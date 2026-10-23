@@ -1,0 +1,11 @@
+BIMS Print - impresion directa de BIMS ERP
+==========================================
+
+1. Doble click en "instalar.bat".
+   (Si Windows muestra un aviso azul, tocar "Mas informacion" y despues "Ejecutar de todas formas".)
+2. Listo: queda funcionando y arranca solo cada vez que se prende la PC.
+3. Entrar a BIMS ERP > Ajustes > Impresion y elegir la impresora de etiquetas y la de tickets.
+
+IMPORTANTE: no cerrar la ventana "BIMS Print - NO CERRAR" (se puede minimizar).
+Si algun dia no imprime, lo primero es fijarse si esa ventana sigue abierta.
+Si no esta, abrir "iniciar.bat" (o reiniciar la PC).

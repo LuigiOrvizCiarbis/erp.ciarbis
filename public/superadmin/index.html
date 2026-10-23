@@ -1,0 +1,1155 @@
+<!DOCTYPE html>
+<html lang="es" data-theme="dark">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>BIMS ERP · SuperAdmin</title>
+<link rel="icon" type="image/png" href="/img/iso-erp-32.png">
+<link rel="apple-touch-icon" href="/img/apple-touch-icon.png">
+<link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.js"></script>
+<style>
+:root[data-theme="dark"]{
+  --bg:#07080F;--surface:#0D0F1A;--card:#141622;--card2:#1A1D2E;
+  --border:rgba(255,255,255,0.08);--accent:#1E40FF;--accent2:#00D4AA;
+  --red:#FF6B6B;--amber:#FFB347;--text:#F0EFF8;--muted:#8B8FA8;--lgray:#C0C4D6;
+  --radius:12px;--input-bg:rgba(255,255,255,0.05);--glow:rgba(30,64,255,0.12);
+  --shadow:0 8px 48px rgba(0,0,0,0.4);
+}
+:root[data-theme="light"]{
+  --bg:#F0F2FA;--surface:#fff;--card:#fff;--card2:#F4F6FB;
+  --border:rgba(0,0,0,0.09);--accent:#1E40FF;--accent2:#0AA882;
+  --red:#DC2626;--amber:#D97706;--text:#0A0C1A;--muted:#5A6080;--lgray:#374151;
+  --radius:12px;--input-bg:rgba(0,0,0,0.04);--glow:rgba(30,64,255,0.08);
+  --shadow:0 8px 48px rgba(0,0,0,0.1);
+}
+*{box-sizing:border-box;margin:0;padding:0}
+html,body{height:100%}
+body{font-family:'Plus Jakarta Sans',sans-serif;background:var(--bg);color:var(--text);transition:background .25s,color .25s}
+
+/* ── LOGIN ── */
+#loginScreen{display:flex;align-items:center;justify-content:center;min-height:100vh;padding:1rem}
+.login-box{
+  background:var(--card);border:1px solid var(--border);border-radius:20px;
+  padding:2.5rem;width:100%;max-width:380px;box-shadow:var(--shadow);
+}
+.login-logo{display:flex;flex-direction:column;align-items:center;gap:8px;margin-bottom:2rem}
+.licon{
+  width:64px;height:64px;display:flex;align-items:center;justify-content:center;
+}
+.licon img{width:100%;height:100%;object-fit:contain}
+.lbrand{font-size:18px;font-weight:800;letter-spacing:-0.3px}
+.lsub{font-size:11px;color:var(--accent2);font-family:'JetBrains Mono',monospace;letter-spacing:.08em}
+.lform h3{font-size:15px;font-weight:700;margin-bottom:.25rem}
+.lform p{color:var(--muted);font-size:13px;margin-bottom:1.5rem}
+.lbl{display:block;font-size:12px;font-weight:600;color:var(--muted);margin:12px 0 4px}
+.linput{
+  width:100%;background:var(--input-bg);border:1px solid var(--border);
+  border-radius:10px;color:var(--text);
+  font-family:'Plus Jakarta Sans',sans-serif;font-size:14px;
+  padding:11px 13px;outline:none;transition:border-color .2s,box-shadow .2s;
+}
+.linput:focus{border-color:var(--accent);box-shadow:0 0 0 3px var(--glow)}
+.lbtn{
+  width:100%;margin-top:1.5rem;padding:13px;background:var(--accent);
+  border:none;border-radius:10px;color:#fff;font-size:14px;font-weight:700;
+  cursor:pointer;font-family:'Plus Jakarta Sans',sans-serif;
+  box-shadow:0 4px 18px rgba(30,64,255,0.35);transition:all .2s;
+}
+.lbtn:hover{opacity:.9;transform:translateY(-1px)}
+.lerr{color:var(--red);font-size:12px;margin-top:10px;text-align:center;display:none;
+  background:rgba(255,107,107,0.1);padding:8px 12px;border-radius:8px}
+
+/* ── LAYOUT PANEL ── */
+#panel{display:none;min-height:100vh;flex-direction:column}
+.topbar{
+  position:fixed;top:0;left:0;right:0;z-index:100;height:56px;
+  display:flex;align-items:center;gap:0;
+  background:var(--surface);border-bottom:1px solid var(--border);
+  backdrop-filter:blur(16px);
+}
+.topbar-logo{
+  display:flex;align-items:center;gap:10px;padding:0 1.25rem;
+  border-right:1px solid var(--border);height:100%;min-width:200px;
+}
+.ticon{width:28px;height:28px;display:flex;align-items:center;justify-content:center}
+.ticon img{width:100%;height:100%;object-fit:contain}
+.tname{font-size:13px;font-weight:700}
+.ttag{font-size:9px;color:var(--accent2);font-family:'JetBrains Mono',monospace;letter-spacing:.05em}
+
+.topbar-tabs{display:flex;align-items:center;gap:4px;padding:0 1rem;flex:1;height:100%}
+.tab{
+  padding:6px 14px;border-radius:8px;border:none;background:transparent;
+  color:var(--muted);font-size:13px;font-weight:500;cursor:pointer;
+  font-family:'Plus Jakarta Sans',sans-serif;transition:all .15s;
+  display:flex;align-items:center;gap:6px;height:36px;
+}
+.tab:hover{color:var(--text);background:var(--input-bg)}
+.tab.active{background:var(--glow);color:var(--accent);font-weight:600}
+.tab .tab-icon{font-size:15px}
+
+.topbar-right{display:flex;align-items:center;gap:8px;padding:0 1rem;margin-left:auto}
+.tbtn{
+  padding:6px 12px;font-size:12px;font-weight:500;border-radius:8px;
+  border:1px solid var(--border);background:transparent;color:var(--muted);
+  cursor:pointer;font-family:'Plus Jakarta Sans',sans-serif;transition:all .15s;
+  display:flex;align-items:center;gap:5px;
+}
+.tbtn:hover{color:var(--text);border-color:var(--lgray)}
+.tbtn-danger{border-color:rgba(255,107,107,0.3);color:var(--red)}
+.tbtn-danger:hover{background:rgba(255,107,107,0.1)}
+
+.content{margin-top:56px;padding:1.5rem;max-width:1400px;margin-left:auto;margin-right:auto}
+
+/* ── SECTION TITLES ── */
+.section-title{
+  display:flex;align-items:center;justify-content:space-between;margin-bottom:1.25rem;
+}
+.stitle{font-size:1.1rem;font-weight:700;letter-spacing:-0.2px}
+.smeta{font-size:12px;color:var(--muted);font-family:'JetBrains Mono',monospace;margin-top:2px}
+.badge-live{
+  display:inline-flex;align-items:center;gap:5px;
+  padding:3px 9px;border-radius:20px;font-size:11px;font-weight:600;
+  background:rgba(0,212,170,0.12);color:var(--accent2);border:1px solid rgba(0,212,170,0.2);
+  font-family:'JetBrains Mono',monospace;
+}
+.dot-live{width:6px;height:6px;border-radius:50%;background:var(--accent2);animation:pulse 2s infinite}
+@keyframes pulse{0%,100%{opacity:1}50%{opacity:.4}}
+
+/* ── STAT CARDS ── */
+.stats-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:10px;margin-bottom:1.25rem}
+.scard{
+  background:var(--card);border:1px solid var(--border);border-radius:var(--radius);
+  padding:1.1rem 1.1rem .9rem;position:relative;overflow:hidden;
+}
+.scard::before{
+  content:'';position:absolute;top:0;left:0;right:0;height:2px;
+}
+.scard.c-blue::before{background:var(--accent)}
+.scard.c-green::before{background:var(--accent2)}
+.scard.c-amber::before{background:var(--amber)}
+.scard.c-red::before{background:var(--red)}
+.scard.c-purple::before{background:#A855F7}
+.scard.c-pink::before{background:#EC4899}
+.sicon{font-size:20px;margin-bottom:.4rem}
+.sval{font-size:1.9rem;font-weight:700;font-family:'JetBrains Mono',monospace;line-height:1.1}
+.slabel{font-size:11px;color:var(--muted);margin-top:3px;font-weight:500}
+.sdelta{font-size:11px;margin-top:4px;font-weight:600}
+.sdelta.up{color:var(--accent2)}.sdelta.neutral{color:var(--muted)}
+
+/* ── CHARTS GRID ── */
+.charts-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin-bottom:1.25rem}
+.ccard{background:var(--card);border:1px solid var(--border);border-radius:var(--radius);padding:1.1rem}
+.ctitle{font-family:'JetBrains Mono',monospace;font-size:9px;letter-spacing:.08em;color:var(--accent2);text-transform:uppercase;font-weight:500;margin-bottom:.75rem}
+.ccard.full{grid-column:span 3}
+.ccard.half{grid-column:span 2}
+
+/* ── TABLE ── */
+.tbar{display:flex;align-items:center;gap:10px;margin-bottom:.9rem;flex-wrap:wrap}
+.tsearch{
+  flex:1;min-width:180px;background:var(--card);border:1px solid var(--border);
+  border-radius:9px;color:var(--text);font-family:'Plus Jakarta Sans',sans-serif;
+  font-size:13px;padding:8px 12px;outline:none;transition:border-color .2s;
+}
+.tsearch:focus{border-color:var(--accent)}
+.tfilter{
+  padding:7px 12px;background:var(--card);border:1px solid var(--border);
+  border-radius:9px;color:var(--text);font-family:'Plus Jakarta Sans',sans-serif;
+  font-size:13px;outline:none;cursor:pointer;
+}
+.twrap{overflow-x:auto;border:1px solid var(--border);border-radius:var(--radius)}
+table{width:100%;border-collapse:collapse;font-size:12.5px}
+thead{background:var(--card2)}
+th{padding:9px 12px;text-align:left;font-weight:600;color:var(--muted);white-space:nowrap;font-size:11px;letter-spacing:.03em;cursor:pointer;user-select:none}
+th:hover{color:var(--text)}
+td{padding:9px 12px;border-top:1px solid var(--border);white-space:nowrap;max-width:200px;overflow:hidden;text-overflow:ellipsis}
+tr:hover td{background:rgba(255,255,255,0.02)}
+.mono{font-family:'JetBrains Mono',monospace;font-size:11px}
+.badge{display:inline-block;padding:2px 8px;border-radius:20px;font-size:11px;font-weight:600}
+.b-retail{background:rgba(30,64,255,0.12);color:var(--accent)}
+.b-fabrica{background:rgba(168,85,247,0.12);color:#A855F7}
+.b-logistica{background:rgba(255,179,71,0.15);color:var(--amber)}
+.b-ecommerce{background:rgba(0,212,170,0.12);color:var(--accent2)}
+.b-otro{background:rgba(139,143,168,0.1);color:var(--muted)}
+.tpagination{display:flex;align-items:center;gap:8px;padding:10px 12px;border-top:1px solid var(--border);justify-content:space-between;font-size:13px;color:var(--muted)}
+.pgbtn{padding:4px 10px;border:1px solid var(--border);border-radius:7px;background:transparent;color:var(--muted);cursor:pointer;font-size:12px}
+.pgbtn:hover{color:var(--text)}.pgbtn.active{background:var(--accent);color:#fff;border-color:var(--accent)}
+
+/* ── IMPORT SECTION ── */
+.import-grid{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:1.25rem}
+.import-card{background:var(--card);border:1px solid var(--border);border-radius:var(--radius);padding:1.25rem}
+.import-card h4{font-size:14px;font-weight:700;margin-bottom:.5rem;display:flex;align-items:center;gap:7px}
+.import-card p{font-size:13px;color:var(--muted);margin-bottom:1rem;line-height:1.5}
+.drop-zone{
+  border:2px dashed var(--border);border-radius:10px;padding:1.75rem 1rem;
+  text-align:center;cursor:pointer;transition:all .2s;
+  color:var(--muted);font-size:13px;
+}
+.drop-zone:hover,.drop-zone.drag{border-color:var(--accent);background:var(--glow);color:var(--text)}
+.drop-icon{font-size:28px;margin-bottom:.5rem}
+.select-wrap{margin-top:.75rem}
+.select-lbl{font-size:12px;color:var(--muted);display:block;margin-bottom:4px}
+.iselect{width:100%;background:var(--input-bg);border:1px solid var(--border);border-radius:9px;color:var(--text);font-size:13px;padding:9px 11px;outline:none;font-family:'Plus Jakarta Sans',sans-serif}
+
+/* ── SPINNER ── */
+.spinner-wrap{display:flex;align-items:center;justify-content:center;padding:3rem}
+.spinner{width:32px;height:32px;border:3px solid var(--border);border-top-color:var(--accent);border-radius:50%;animation:spin .8s linear infinite}
+@keyframes spin{to{transform:rotate(360deg)}}
+
+/* ── EMPTY ── */
+.empty{text-align:center;padding:3rem;color:var(--muted);font-size:13px}
+.empty-icon{font-size:32px;margin-bottom:.5rem}
+
+/* ── ALERT ── */
+.toast{
+  position:fixed;bottom:1.5rem;right:1.5rem;z-index:1000;
+  padding:12px 16px;border-radius:10px;font-size:13px;font-weight:500;
+  max-width:300px;transform:translateY(100px);opacity:0;transition:all .25s;
+  box-shadow:0 8px 24px rgba(0,0,0,0.3);
+}
+.toast.show{transform:translateY(0);opacity:1}
+.toast-ok{background:var(--accent2);color:#fff}
+.toast-err{background:var(--red);color:#fff}
+
+/* ── MODAL PREVIEW ── */
+.modal-bg{
+  position:fixed;inset:0;background:rgba(0,0,0,0.6);z-index:200;
+  display:flex;align-items:center;justify-content:center;padding:1rem;
+  display:none;
+}
+.modal{background:var(--card);border:1px solid var(--border);border-radius:18px;padding:1.75rem;width:100%;max-width:700px;max-height:80vh;overflow-y:auto;box-shadow:var(--shadow)}
+.modal h3{font-size:16px;font-weight:700;margin-bottom:1rem}
+.modal-footer{display:flex;gap:8px;margin-top:1rem}
+
+/* ── RESPONSIVE ── */
+@media(max-width:900px){
+  .charts-grid{grid-template-columns:1fr 1fr}
+  .ccard.full{grid-column:span 2}
+  .import-grid{grid-template-columns:1fr}
+  .topbar-tabs{display:none}
+}
+@media(max-width:600px){
+  .stats-grid{grid-template-columns:repeat(2,1fr)}
+  .charts-grid{grid-template-columns:1fr}
+  .ccard.full,.ccard.half{grid-column:span 1}
+  .content{padding:1rem}
+}
+</style>
+</head>
+<body>
+
+<!-- ═══════ LOGIN ═══════ -->
+<div id="loginScreen">
+  <div class="login-box">
+    <div class="login-logo">
+      <div class="lbrand"><img src="/img/logo-bims-erp-128.png" alt="BIMS ERP" style="height:36px"/></div>
+      <div class="lsub">SUPERADMIN · PANEL</div>
+    </div>
+    <div class="lform">
+      <h3>Acceso restringido</h3>
+      <p>Solo para administradores de la plataforma.</p>
+      <label class="lbl">Contraseña de acceso</label>
+      <input class="linput" type="password" id="loginPwd" placeholder="••••••••••••"
+        onkeydown="if(event.key==='Enter')doLogin()">
+      <button class="lbtn" onclick="doLogin()">Ingresar al panel</button>
+      <div class="lerr" id="loginErr">Contraseña incorrecta</div>
+    </div>
+  </div>
+</div>
+
+<!-- ═══════ PANEL ═══════ -->
+<div id="panel">
+
+  <!-- TOPBAR -->
+  <div class="topbar">
+    <div class="topbar-logo">
+      <div>
+        <div class="tname"><img src="/img/logo-bims-erp-128.png" alt="BIMS ERP" style="height:22px;display:block"/></div>
+        <div class="ttag">SUPERADMIN</div>
+      </div>
+    </div>
+    <div class="topbar-tabs">
+      <button class="tab active" id="tab-dashboard" onclick="showTab('dashboard')">
+        <span class="tab-icon">📊</span> Dashboard
+      </button>
+      <button class="tab" id="tab-clientes" onclick="showTab('clientes')">
+        <span class="tab-icon">🏢</span> Clientes
+      </button>
+      <button class="tab" id="tab-import" onclick="showTab('import')">
+        <span class="tab-icon">📥</span> Import / Export
+      </button>
+    </div>
+    <div class="topbar-right">
+      <span class="badge-live"><span class="dot-live"></span> Live</span>
+      <button class="tbtn" onclick="refreshAll()">↻ Actualizar</button>
+      <button class="tbtn" id="btnTheme">🌙</button>
+      <button class="tbtn tbtn-danger" onclick="doLogout()">Salir</button>
+    </div>
+  </div>
+
+  <!-- CONTENT -->
+  <div class="content">
+
+    <!-- ── TAB: DASHBOARD ── -->
+    <div id="view-dashboard">
+      <div class="section-title">
+        <div>
+          <div class="stitle">Panel de métricas</div>
+          <div class="smeta" id="lastUpdate">Cargando...</div>
+        </div>
+        <div class="badge-live"><span class="dot-live"></span> Datos en tiempo real</div>
+      </div>
+
+      <!-- ERP Metrics -->
+      <div style="font-size:11px;font-family:'JetBrains Mono',monospace;color:var(--muted);text-transform:uppercase;letter-spacing:.06em;margin-bottom:.6rem">
+        📦 Base de datos ERP (PostgreSQL)
+      </div>
+      <div class="stats-grid" id="erpStats">
+        <div class="scard c-blue"><div class="sicon">🏢</div><div class="sval" id="st-tenants">—</div><div class="slabel">Tenants totales</div></div>
+        <div class="scard c-green"><div class="sicon">✅</div><div class="sval" id="st-activos">—</div><div class="slabel">Tenants activos</div></div>
+        <div class="scard c-amber"><div class="sicon">👥</div><div class="sval" id="st-usuarios">—</div><div class="slabel">Usuarios creados</div></div>
+        <div class="scard c-purple"><div class="sicon">📦</div><div class="sval" id="st-productos">—</div><div class="slabel">Productos</div></div>
+        <div class="scard c-green"><div class="sicon">🛒</div><div class="sval" id="st-ventas">—</div><div class="slabel">Órdenes de venta</div></div>
+        <div class="scard c-amber"><div class="sicon">📥</div><div class="sval" id="st-compras">—</div><div class="slabel">Órdenes de compra</div></div>
+        <div class="scard c-red"><div class="sicon">🎫</div><div class="sval" id="st-tickets">—</div><div class="slabel">Tickets/Comprobantes</div></div>
+        <div class="scard c-pink"><div class="sicon">👤</div><div class="sval" id="st-clientes">—</div><div class="slabel">Clientes registrados</div></div>
+      </div>
+
+      <!-- Onboarding Stats -->
+      <div style="font-size:11px;font-family:'JetBrains Mono',monospace;color:var(--muted);text-transform:uppercase;letter-spacing:.06em;margin-bottom:.6rem;margin-top:.75rem">
+        📋 Onboarding / Registros (CSV)
+      </div>
+      <div class="stats-grid">
+        <div class="scard c-blue"><div class="sicon">📝</div><div class="sval" id="st-registros">—</div><div class="slabel">Total registros</div></div>
+        <div class="scard c-green"><div class="sicon">🏪</div><div class="sval" id="st-ind-top">—</div><div class="slabel">Industria principal</div></div>
+        <div class="scard c-amber"><div class="sicon">📍</div><div class="sval" id="st-ciudad-top">—</div><div class="slabel">Ciudad principal</div></div>
+        <div class="scard c-purple"><div class="sicon">📈</div><div class="sval" id="st-hoy">—</div><div class="slabel">Registros hoy</div></div>
+      </div>
+
+      <!-- CHARTS -->
+      <div class="charts-grid">
+        <div class="ccard">
+          <div class="ctitle">Por industria</div>
+          <canvas id="chartIndustria" height="200"></canvas>
+        </div>
+        <div class="ccard">
+          <div class="ctitle">Por sucursales</div>
+          <canvas id="chartSucursales" height="200"></canvas>
+        </div>
+        <div class="ccard">
+          <div class="ctitle">Top ciudades</div>
+          <canvas id="chartCiudad" height="200"></canvas>
+        </div>
+        <div class="ccard full">
+          <div class="ctitle">Registros por día (últimos 30 días)</div>
+          <canvas id="chartDias" height="90"></canvas>
+        </div>
+      </div>
+    </div>
+
+    <!-- ── TAB: CLIENTES ── -->
+    <div id="view-clientes" style="display:none">
+      <div class="section-title">
+        <div>
+          <div class="stitle">Clientes registrados</div>
+          <div class="smeta" id="clientesCount">—</div>
+        </div>
+        <button class="tbtn" onclick="exportCSV('onboarding')">⬇ Exportar CSV</button>
+      </div>
+
+      <div class="tbar">
+        <input class="tsearch" type="text" id="busqueda" placeholder="🔍  Buscar empresa, email, nombre..."
+          oninput="filterClientes()">
+        <select class="tfilter" id="filtroIndustria" onchange="filterClientes()">
+          <option value="all">Todas las industrias</option>
+          <option value="retail">Retail / Comercio</option>
+          <option value="supermercado">Supermercado</option>
+          <option value="fabrica">Fábrica</option>
+          <option value="logistica">Logística</option>
+          <option value="ecommerce">E-Commerce</option>
+          <option value="mayorista">Mayorista</option>
+          <option value="servicios">Servicios</option>
+          <option value="otro">Otro</option>
+        </select>
+      </div>
+
+      <div class="twrap">
+        <table>
+          <thead>
+            <tr>
+              <th onclick="sortTable('timestamp')">Fecha ↕</th>
+              <th onclick="sortTable('empresa')">Empresa ↕</th>
+              <th>Industria</th>
+              <th onclick="sortTable('nombre')">Contacto ↕</th>
+              <th>Email</th>
+              <th>Tel</th>
+              <th>Ciudad</th>
+              <th>Tamaño</th>
+              <th>Sucursales</th>
+              <th>Sistema</th>
+              <th>Tenant ID</th>
+              <th>Métricas</th>
+              <th>Módulos</th>
+              <th>Plan / Estado</th>
+            </tr>
+          </thead>
+          <tbody id="clientesTbody">
+            <tr><td colspan="14"><div class="spinner-wrap"><div class="spinner"></div></div></td></tr>
+          </tbody>
+        </table>
+        <div class="tpagination">
+          <span id="pgInfo">—</span>
+          <div id="pgBtns" style="display:flex;gap:4px"></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ── TAB: IMPORT/EXPORT ── -->
+    <div id="view-import" style="display:none">
+      <div class="section-title">
+        <div class="stitle">Import / Export de datos</div>
+      </div>
+
+      <div class="import-grid">
+        <!-- EXPORT -->
+        <div class="import-card">
+          <h4>⬇ Exportar datos</h4>
+          <p>Descargá los registros de onboarding en formato CSV, compatible con Excel.</p>
+          <div class="select-wrap">
+            <span class="select-lbl">Dataset a exportar</span>
+            <select class="iselect" id="exportTipo">
+              <option value="onboarding">Onboarding completo (todos los clientes)</option>
+            </select>
+          </div>
+          <br>
+          <button class="tbtn" onclick="exportCSV(document.getElementById('exportTipo').value)"
+            style="width:100%;justify-content:center;padding:11px">
+            ⬇ Descargar CSV
+          </button>
+        </div>
+
+        <!-- IMPORT PRODUCTOS -->
+        <div class="import-card">
+          <h4>⬆ Importar stock/productos</h4>
+          <p>Subí un CSV con el inventario de un cliente y seleccioná el tenant al que importar. Ideal para el onboarding inicial.</p>
+          <div class="drop-zone" id="dropZone"
+            onclick="document.getElementById('csvFile').click()"
+            ondragover="e=>{e.preventDefault();this.classList.add('drag')}"
+            ondragleave="this.classList.remove('drag')"
+            ondrop="handleDrop(event)">
+            <div class="drop-icon">📄</div>
+            <div>Hacé click o arrastrá un CSV aquí</div>
+            <div style="font-size:11px;margin-top:4px;color:var(--muted)">columnas: nombre, sku, precio, stock, categoria</div>
+          </div>
+          <input type="file" id="csvFile" accept=".csv" style="display:none" onchange="handleFile(this.files[0])">
+          <div class="select-wrap">
+            <span class="select-lbl">Seleccionar tenant destino</span>
+            <select class="iselect" id="tenantDestino">
+              <option value="">Seleccioná un cliente...</option>
+            </select>
+          </div>
+          <br>
+          <button class="tbtn" id="btnImport" style="width:100%;justify-content:center;padding:11px" disabled
+            onclick="doImport()">
+            ⬆ Importar al ERP
+          </button>
+        </div>
+      </div>
+
+      <!-- PLANTILLAS -->
+      <div class="import-card" style="margin-bottom:1rem">
+        <h4>📋 Plantillas CSV</h4>
+        <p>Descargá plantillas de ejemplo para completar con los datos del cliente antes de importar.</p>
+        <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:.5rem">
+          <button class="tbtn" onclick="downloadTemplate('productos')">📦 Plantilla Productos</button>
+          <button class="tbtn" onclick="downloadTemplate('clientes')">👤 Plantilla Clientes</button>
+          <button class="tbtn" onclick="downloadTemplate('proveedores')">🏭 Plantilla Proveedores</button>
+          <button class="tbtn" onclick="downloadTemplate('lista-precios')">💲 Lista de Precios</button>
+        </div>
+      </div>
+
+      <!-- PREVIEW TABLE -->
+      <div id="previewWrap" style="display:none">
+        <div class="section-title" style="margin-top:1rem">
+          <div class="stitle">Vista previa del CSV</div>
+        </div>
+        <div class="twrap">
+          <table>
+            <thead id="previewHead"></thead>
+            <tbody id="previewBody"></tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+
+  </div><!-- /content -->
+</div><!-- /panel -->
+
+<!-- MODAL -->
+<div class="modal-bg" id="modalBg">
+  <div class="modal" id="modalContent"></div>
+</div>
+
+<!-- TOAST -->
+<div class="toast" id="toast"></div>
+
+<script>
+// ════════════════════════════════════════════
+//  CONFIG
+// ════════════════════════════════════════════
+const API = location.origin + '/api/v1'
+const TOKEN_KEY = 'nexo-sa-token'
+// El token SA se setea en el .env del backend como SA_TOKEN
+
+let CHARTS = {}
+let allClientes = []
+let filteredClientes = []
+let currentPage = 1
+const PER_PAGE = 30
+let sortField = 'timestamp'
+let sortAsc = false
+
+// ── THEME ──
+const html = document.documentElement
+const savedTheme = localStorage.getItem('nexo-theme') || 'dark'
+html.setAttribute('data-theme', savedTheme)
+document.getElementById('btnTheme').textContent = savedTheme === 'dark' ? '☀️' : '🌙'
+document.getElementById('btnTheme').onclick = () => {
+  const t = html.getAttribute('data-theme') === 'dark' ? 'light' : 'dark'
+  html.setAttribute('data-theme', t)
+  localStorage.setItem('nexo-theme', t)
+  document.getElementById('btnTheme').textContent = t === 'dark' ? '☀️' : '🌙'
+  // Redraw charts
+  setTimeout(() => {
+    Object.values(CHARTS).forEach(c => c.destroy())
+    CHARTS = {}
+    loadStats()
+  }, 300)
+}
+
+// ════════════════════════════════════════════
+//  AUTH
+// ════════════════════════════════════════════
+function doLogin() {
+  const pwd = document.getElementById('loginPwd').value
+  if (!pwd) return
+
+  // El token es la contraseña directa que se manda al PHP
+  // PHP verifica contra SUPERADMIN_TOKEN env var
+  const t = pwd.trim()
+  fetch(`${API}/superadmin/stats`, { headers: { "x-sa-token": t } })
+    .then(r => r.json())
+    .then(d => {
+      if (d.error) {
+        document.getElementById('loginErr').style.display = 'block'
+        return
+      }
+      localStorage.setItem(TOKEN_KEY, t)
+      document.getElementById('loginScreen').style.display = 'none'
+      document.getElementById('panel').style.display = 'flex'
+      document.getElementById('panel').style.flexDirection = 'column'
+      initPanel(d)
+    })
+    .catch(() => { document.getElementById('loginErr').style.display = 'block' })
+}
+document.getElementById('loginPwd').onkeydown = e => { if(e.key==='Enter') doLogin() }
+
+function doLogout() {
+  localStorage.removeItem(TOKEN_KEY)
+  location.reload()
+}
+
+// Auto-login si hay token guardado
+const saved = localStorage.getItem(TOKEN_KEY)
+if (saved) {
+  fetch(`${API}/superadmin/stats`, { headers: { "x-sa-token": saved } })
+    .then(r => r.json())
+    .then(d => {
+      if (d.ok) {
+        document.getElementById('loginScreen').style.display = 'none'
+        document.getElementById('panel').style.display = 'flex'
+        document.getElementById('panel').style.flexDirection = 'column'
+        initPanel(d)
+      }
+    }).catch(()=>{})
+}
+
+function getToken() { return localStorage.getItem(TOKEN_KEY) || '' }
+
+// ════════════════════════════════════════════
+//  INIT
+// ════════════════════════════════════════════
+function initPanel(statsData) {
+  renderStats(statsData)
+  renderCharts(statsData)
+  loadErpMetrics()
+  loadClientes()
+  document.getElementById('lastUpdate').textContent =
+    'Última actualización: ' + new Date().toLocaleString('es-AR')
+}
+
+function refreshAll() {
+  Object.values(CHARTS).forEach(c => c.destroy())
+  CHARTS = {}
+  loadStats()
+  loadErpMetrics()
+  loadClientes()
+  showToast('Datos actualizados', 'ok')
+}
+
+// ════════════════════════════════════════════
+//  TAB SWITCH
+// ════════════════════════════════════════════
+function showTab(name) {
+  ['dashboard','clientes','import'].forEach(t => {
+    document.getElementById('view-' + t).style.display = t === name ? 'block' : 'none'
+    document.getElementById('tab-' + t).classList.toggle('active', t === name)
+  })
+}
+
+// ════════════════════════════════════════════
+//  LOAD STATS
+// ════════════════════════════════════════════
+function loadStats() {
+  fetch(`${API}/superadmin/stats`, { headers: { "x-sa-token": getToken() } })
+    .then(r => r.json())
+    .then(d => {
+      renderStats(d)
+      renderCharts(d)
+      document.getElementById('lastUpdate').textContent =
+        'Última actualización: ' + new Date().toLocaleString('es-AR')
+    }).catch(() => showToast('Error al cargar stats', 'err'))
+}
+
+function renderStats(d) {
+  const el = (id, v) => { const e = document.getElementById(id); if(e) e.textContent = v }
+  el('st-registros', d.total_registros ?? '0')
+
+  // Top industria
+  const ind = d.por_industria || {}
+  const topInd = Object.keys(ind)[0] || '—'
+  el('st-ind-top', topInd)
+
+  // Top ciudad
+  const ciu = d.por_ciudad || {}
+  const topCiu = Object.keys(ciu)[0] || '—'
+  el('st-ciudad-top', topCiu)
+
+  // Hoy
+  const hoy = new Date().toISOString().slice(0,10)
+  el('st-hoy', (d.por_dia || {})[hoy] ?? '0')
+}
+
+function loadErpMetrics() {
+  fetch(`${API}/superadmin/metricas-erp`, { headers: { "x-sa-token": getToken() } })
+    .then(r => r.json())
+    .then(d => {
+      if (!d.data) return
+      const m = d.data
+      const el = (id, v) => { const e = document.getElementById(id); if(e) e.textContent = fmt(v) }
+      el('st-tenants', m.tenants_total)
+      el('st-activos', m.tenants_activos)
+      el('st-usuarios', m.usuarios_total)
+      el('st-productos', m.productos_total)
+      el('st-ventas', m.ordenes_venta_total)
+      el('st-compras', m.ordenes_compra_total)
+      el('st-tickets', m.tickets_total)
+      el('st-clientes', m.clientes_total)
+    }).catch(() => {
+      // Mostrar placeholder si no hay conexión al ERP
+      ['st-tenants','st-activos','st-usuarios','st-productos','st-ventas','st-compras','st-tickets','st-clientes']
+        .forEach(id => { const e = document.getElementById(id); if(e) e.textContent = '—' })
+    })
+}
+
+function fmt(n) { return n != null ? Number(n).toLocaleString('es-AR') : '—' }
+
+// ════════════════════════════════════════════
+//  CHARTS
+// ════════════════════════════════════════════
+const isDark = () => html.getAttribute('data-theme') === 'dark'
+
+function chartColors() {
+  return {
+    grid: isDark() ? 'rgba(255,255,255,0.06)' : 'rgba(0,0,0,0.06)',
+    text: isDark() ? '#8B8FA8' : '#5A6080',
+    accent: ['#1E40FF','#00D4AA','#FFB347','#FF6B6B','#A855F7','#EC4899','#06B6D4','#84CC16'],
+  }
+}
+
+function renderCharts(d) {
+  const cc = chartColors()
+
+  // ── Industria ──
+  const indLabels = Object.keys(d.por_industria || {})
+  const indVals = Object.values(d.por_industria || {})
+  if (indLabels.length && !CHARTS.industria) {
+    CHARTS.industria = new Chart(document.getElementById('chartIndustria'), {
+      type: 'doughnut',
+      data: {
+        labels: indLabels,
+        datasets: [{ data: indVals, backgroundColor: cc.accent, borderWidth: 0 }]
+      },
+      options: {
+        plugins: { legend: { labels: { color: cc.text, font: { size: 11 } } } },
+        cutout: '65%',
+      }
+    })
+  }
+
+  // ── Sucursales ──
+  const sucLabels = Object.keys(d.por_sucursales || {})
+  const sucVals = Object.values(d.por_sucursales || {})
+  if (sucLabels.length && !CHARTS.sucursales) {
+    CHARTS.sucursales = new Chart(document.getElementById('chartSucursales'), {
+      type: 'bar',
+      data: {
+        labels: sucLabels,
+        datasets: [{ label: 'Empresas', data: sucVals, backgroundColor: '#1E40FF88', borderRadius: 6 }]
+      },
+      options: {
+        plugins: { legend: { display: false } },
+        scales: {
+          x: { grid: { color: cc.grid }, ticks: { color: cc.text, font: { size: 11 } } },
+          y: { grid: { color: cc.grid }, ticks: { color: cc.text, font: { size: 11 } } }
+        }
+      }
+    })
+  }
+
+  // ── Ciudad ──
+  const ciuLabels = Object.keys(d.por_ciudad || {}).slice(0,8)
+  const ciuVals = Object.values(d.por_ciudad || {}).slice(0,8)
+  if (ciuLabels.length && !CHARTS.ciudad) {
+    CHARTS.ciudad = new Chart(document.getElementById('chartCiudad'), {
+      type: 'bar',
+      data: {
+        labels: ciuLabels,
+        datasets: [{ data: ciuVals, backgroundColor: '#00D4AA88', borderRadius: 6 }]
+      },
+      options: {
+        indexAxis: 'y',
+        plugins: { legend: { display: false } },
+        scales: {
+          x: { grid: { color: cc.grid }, ticks: { color: cc.text, font: { size: 11 } } },
+          y: { grid: { display: false }, ticks: { color: cc.text, font: { size: 11 } } }
+        }
+      }
+    })
+  }
+
+  // ── Días ──
+  const diasLabels = Object.keys(d.por_dia || {})
+  const diasVals = Object.values(d.por_dia || {})
+  if (diasLabels.length && !CHARTS.dias) {
+    CHARTS.dias = new Chart(document.getElementById('chartDias'), {
+      type: 'line',
+      data: {
+        labels: diasLabels,
+        datasets: [{
+          label: 'Registros',
+          data: diasVals,
+          borderColor: '#1E40FF',
+          backgroundColor: 'rgba(30,64,255,0.08)',
+          fill: true,
+          tension: 0.4,
+          pointRadius: 3,
+        }]
+      },
+      options: {
+        plugins: { legend: { display: false } },
+        scales: {
+          x: { grid: { color: cc.grid }, ticks: { color: cc.text, font: { size: 10 }, maxTicksLimit: 10 } },
+          y: { grid: { color: cc.grid }, ticks: { color: cc.text, font: { size: 11 } } }
+        }
+      }
+    })
+  }
+}
+
+// ════════════════════════════════════════════
+//  CLIENTES TABLE
+// ════════════════════════════════════════════
+function loadClientes() {
+  // Cargar tanto el CSV de onboarding como los tenants reales de la DB
+  Promise.all([
+    fetch(`${API}/superadmin/clientes`, { headers: { "x-sa-token": getToken() } }).then(r=>r.json()).catch(()=>({filas:[]})),
+    fetch(`${API}/superadmin/tenants`, { headers: { "x-sa-token": getToken() } }).then(r=>r.json()).catch(()=>({tenants:[]}))
+  ]).then(([csv, db]) => {
+    const csvRows = csv.filas || []
+    const dbTenants = (db.tenants || []).map(t => ({
+      timestamp: (t.creadoEn||'').slice(0,16).replace('T',' '),
+      empresa: t.nombre||'—',
+      email: t.email||'—',
+      tenant_id: t.id||'—',
+      industria: '—',
+      ciudad: '—',
+      tamano: '—',
+      sucursales: String(t._count?.users||0)+' usuarios',
+      sistema: t.plan||'—',
+      nombre: '—',
+      cargo: '—',
+      tel: '—',
+      pais: '—',
+      cuit: '—',
+      _fromDB: true,
+      _count: t._count,
+      rubro: t.rubro || '',
+      modulosActivos: t.modulosActivos || [],
+      plan: t.plan || 'TRIAL',
+      trialVence: t.trialVence || null,
+      planVence: t.planVence || null,
+      activo: t.activo !== false,
+    }))
+    // Combinar: CSV primero, luego DB (evitar duplicados por email)
+    const csvEmails = new Set(csvRows.map(r=>r.email))
+    const dbOnly = dbTenants.filter(t => !csvEmails.has(t.email))
+    allClientes = [...csvRows, ...dbOnly]
+    filteredClientes = [...allClientes]
+    currentPage = 1
+
+      // Popular select de tenant destino para import
+      const sel = document.getElementById('tenantDestino')
+      sel.innerHTML = '<option value="">Seleccioná un cliente...</option>'
+      allClientes.forEach(r => {
+        if (r.tenant_id) {
+          const o = document.createElement('option')
+          o.value = r.tenant_id
+          o.textContent = r.empresa + ' (' + r.email + ')'
+          sel.appendChild(o)
+        }
+      })
+
+      renderTable()
+    }).catch(() => showToast('Error al cargar clientes', 'err'))
+}
+
+function filterClientes() {
+  const q = document.getElementById('busqueda').value.toLowerCase()
+  const ind = document.getElementById('filtroIndustria').value
+  filteredClientes = allClientes.filter(r => {
+    const matchQ = !q || [r.empresa,r.email,r.nombre].some(v => (v||'').toLowerCase().includes(q))
+    const matchInd = !ind || ind === 'all' || (r.industria||'') === ind
+    return matchQ && matchInd
+  })
+  currentPage = 1
+  renderTable()
+}
+
+function sortTable(field) {
+  if (sortField === field) sortAsc = !sortAsc
+  else { sortField = field; sortAsc = false }
+  filteredClientes.sort((a,b) => {
+    const va = (a[field]||'').toString()
+    const vb = (b[field]||'').toString()
+    return sortAsc ? va.localeCompare(vb) : vb.localeCompare(va)
+  })
+  renderTable()
+}
+
+function renderTable() {
+  const total = filteredClientes.length
+  const totalPages = Math.ceil(total / PER_PAGE) || 1
+  const start = (currentPage - 1) * PER_PAGE
+  const rows = filteredClientes.slice(start, start + PER_PAGE)
+
+  document.getElementById('clientesCount').textContent =
+    `${total.toLocaleString('es-AR')} registros` + (total < allClientes.length ? ` (filtrado de ${allClientes.length})` : '')
+
+  const tbody = document.getElementById('clientesTbody')
+  if (!rows.length) {
+    tbody.innerHTML = `<tr><td colspan="14"><div class="empty"><div class="empty-icon">🔍</div>Sin resultados</div></td></tr>`
+    return
+  }
+
+  function indBadge(ind) {
+    const map = { retail:'b-retail',fabrica:'b-fabrica',logistica:'b-logistica',ecommerce:'b-ecommerce' }
+    return `<span class="badge ${map[ind]||'b-otro'}">${ind||'—'}</span>`
+  }
+
+  tbody.innerHTML = rows.map(r => `
+    <tr>
+      <td class="mono">${(r.timestamp||'').slice(0,16)}</td>
+      <td title="${r.empresa||''}" style="font-weight:600;max-width:160px">${r.empresa||'—'}</td>
+      <td>${indBadge(r.industria)}</td>
+      <td title="${r.nombre||''}">${r.nombre||'—'}</td>
+      <td><a href="mailto:${r.email||''}" style="color:var(--accent);text-decoration:none">${r.email||'—'}</a></td>
+      <td class="mono">${r.tel||'—'}</td>
+      <td>${r.ciudad||'—'}</td>
+      <td>${r.tamano||'—'}</td>
+      <td>${r.sucursales||'—'}</td>
+      <td>${r.sistema||'—'}</td>
+      <td class="mono" style="font-size:10px;max-width:120px" title="${r.tenant_id||''}">${r.tenant_id ? r.tenant_id.slice(0,12)+'…' : '—'}</td>
+      <td style="font-size:11px">${r._count ? `👥${r._count.users||0} 📦${r._count.productos||0} 💼${r._count.ordVentas||0}` : ''}</td>
+      <td>${r._fromDB ? `<button class="tbtn" style="padding:5px 10px;font-size:11px" onclick="abrirModalModulos('${r.tenant_id}')">${(r.modulosActivos||[]).length} activos ✏️</button>` : '—'}</td>
+      <td>${r._fromDB ? `<div style="display:flex;align-items:center;gap:6px">${estadoBadgeHtml(r)}<button class="tbtn" style="padding:5px 10px;font-size:11px" onclick="abrirModalPlan('${r.tenant_id}')">⚙️</button></div>` : '—'}</td>
+    </tr>`).join('')
+
+  // Pagination
+  document.getElementById('pgInfo').textContent = `Página ${currentPage} de ${totalPages} · ${total} registros`
+  const pgBtns = document.getElementById('pgBtns')
+  pgBtns.innerHTML = ''
+  const pages = []
+  if (totalPages <= 7) {
+    for (let i=1;i<=totalPages;i++) pages.push(i)
+  } else {
+    pages.push(1)
+    if (currentPage > 3) pages.push('...')
+    for (let i=Math.max(2,currentPage-1);i<=Math.min(totalPages-1,currentPage+1);i++) pages.push(i)
+    if (currentPage < totalPages - 2) pages.push('...')
+    pages.push(totalPages)
+  }
+  pages.forEach(p => {
+    const btn = document.createElement('button')
+    btn.className = 'pgbtn' + (p === currentPage ? ' active' : '')
+    btn.textContent = p
+    if (p !== '...') btn.onclick = () => { currentPage = p; renderTable() }
+    pgBtns.appendChild(btn)
+  })
+}
+
+// ════════════════════════════════════════════
+//  EDITAR MÓDULOS DE UN TENANT
+// ════════════════════════════════════════════
+let modulosCatalogoSA = null
+async function abrirModalModulos(tenantId) {
+  const row = allClientes.find(r => r.tenant_id === tenantId)
+  if (!row) return
+  if (!modulosCatalogoSA) {
+    modulosCatalogoSA = await fetch(`${API}/auth/modulos-catalogo`).then(r => r.json()).catch(() => ({ catalogo: [] }))
+  }
+  const activos = new Set(row.modulosActivos || [])
+  const items = (modulosCatalogoSA.catalogo || []).map(m => `
+    <label style="display:flex;align-items:center;gap:10px;padding:9px 4px;border-bottom:1px solid var(--border);${m.comingSoon ? 'opacity:.5' : ''}">
+      <input type="checkbox" value="${m.id}" ${activos.has(m.id) ? 'checked' : ''} ${m.comingSoon ? 'disabled' : ''} style="width:16px;height:16px">
+      <span>${m.icon}</span><span style="flex:1">${m.label}</span>
+      ${m.comingSoon ? '<span style="font-size:10px;color:var(--text2)">Próximamente</span>' : ''}
+    </label>`).join('')
+  document.getElementById('modalContent').innerHTML = `
+    <h3>Módulos — ${row.empresa || tenantId}</h3>
+    <div id="modulosCheckList">${items}</div>
+    <div class="modal-footer">
+      <button class="tbtn" onclick="guardarModulos('${tenantId}')">Guardar</button>
+      <button class="tbtn" onclick="document.getElementById('modalBg').style.display='none'">Cancelar</button>
+    </div>`
+  document.getElementById('modalBg').style.display = 'flex'
+}
+async function guardarModulos(tenantId) {
+  const checks = document.querySelectorAll('#modulosCheckList input[type="checkbox"]:checked')
+  const modulos = Array.from(checks).map(c => c.value)
+  const r = await fetch(`${API}/superadmin/tenants/${tenantId}/modulos`, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json', 'x-sa-token': getToken() },
+    body: JSON.stringify({ modulos }),
+  }).then(r => r.json()).catch(() => ({}))
+  if (r.ok) {
+    showToast('Módulos actualizados ✅', 'ok')
+    document.getElementById('modalBg').style.display = 'none'
+    const row = allClientes.find(r => r.tenant_id === tenantId)
+    if (row) row.modulosActivos = modulos
+    renderTable()
+  } else {
+    showToast(r.message || 'Error al guardar módulos', 'err')
+  }
+}
+document.getElementById('modalBg').addEventListener('click', e => { if (e.target.id === 'modalBg') e.target.style.display = 'none' })
+
+// ════════════════════════════════════════════
+//  PLAN / ESTADO DE UN TENANT (trial, plan, suspender)
+// ════════════════════════════════════════════
+function estadoBadgeHtml(r) {
+  const now = new Date()
+  const plan = r.plan || 'TRIAL'
+  const planLabel = { TRIAL:'Trial', STARTER:'Starter', PROFESIONAL:'Profesional', ENTERPRISE:'Enterprise' }[plan] || plan
+  if (r.activo === false) {
+    return `<span class="badge" style="background:rgba(255,107,107,0.15);color:var(--red)">⛔ Suspendido</span>`
+  }
+  if (plan === 'TRIAL') {
+    if (r.trialVence) {
+      const venc = new Date(r.trialVence)
+      const diasRest = Math.ceil((venc - now) / 86400000)
+      if (diasRest < 0) return `<span class="badge" style="background:rgba(255,107,107,0.15);color:var(--red)">Trial vencido</span>`
+      const isSoon = diasRest <= 3
+      return `<span class="badge" style="background:${isSoon?'rgba(255,179,71,0.15)':'rgba(30,64,255,0.12)'};color:${isSoon?'var(--amber)':'var(--accent)'}">Trial · ${diasRest}d</span>`
+    }
+    return `<span class="badge" style="background:rgba(30,64,255,0.12);color:var(--accent)">Trial</span>`
+  }
+  if (r.planVence && new Date(r.planVence) < now) {
+    return `<span class="badge" style="background:rgba(255,107,107,0.15);color:var(--red)">${planLabel} vencido</span>`
+  }
+  return `<span class="badge" style="background:rgba(0,212,170,0.12);color:var(--accent2)">${planLabel}</span>`
+}
+
+function fmtDateInput(d) { return d ? new Date(d).toISOString().slice(0,10) : '' }
+
+function abrirModalPlan(tenantId) {
+  const row = allClientes.find(r => r.tenant_id === tenantId)
+  if (!row) return
+  document.getElementById('modalContent').innerHTML = `
+    <h3>Plan y estado — ${row.empresa || tenantId}</h3>
+    <div style="display:flex;flex-direction:column;gap:14px;margin-top:.5rem">
+      <div>
+        <span class="select-lbl">Plan</span>
+        <select class="iselect" id="planSelect">
+          <option value="TRIAL" ${row.plan==='TRIAL'?'selected':''}>Trial</option>
+          <option value="STARTER" ${row.plan==='STARTER'?'selected':''}>Starter</option>
+          <option value="PROFESIONAL" ${row.plan==='PROFESIONAL'?'selected':''}>Profesional</option>
+          <option value="ENTERPRISE" ${row.plan==='ENTERPRISE'?'selected':''}>Enterprise</option>
+        </select>
+      </div>
+      <div>
+        <span class="select-lbl">Trial vence</span>
+        <input class="iselect" type="date" id="trialVenceInput" value="${fmtDateInput(row.trialVence)}">
+        <div style="display:flex;gap:6px;margin-top:6px">
+          <button class="tbtn" style="font-size:11px;padding:5px 9px" onclick="extenderDias('trialVenceInput',7)">+7 días</button>
+          <button class="tbtn" style="font-size:11px;padding:5px 9px" onclick="extenderDias('trialVenceInput',14)">+14 días</button>
+          <button class="tbtn" style="font-size:11px;padding:5px 9px" onclick="extenderDias('trialVenceInput',30)">+30 días</button>
+        </div>
+      </div>
+      <div>
+        <span class="select-lbl">Plan vence (solo planes pagos · vacío = sin vencimiento)</span>
+        <input class="iselect" type="date" id="planVenceInput" value="${fmtDateInput(row.planVence)}">
+        <div style="display:flex;gap:6px;margin-top:6px">
+          <button class="tbtn" style="font-size:11px;padding:5px 9px" onclick="extenderDias('planVenceInput',30)">+30 días</button>
+          <button class="tbtn" style="font-size:11px;padding:5px 9px" onclick="extenderDias('planVenceInput',365)">+1 año</button>
+        </div>
+      </div>
+      <label style="display:flex;align-items:center;gap:10px;padding-top:2px;cursor:pointer">
+        <input type="checkbox" id="activoCheck" ${row.activo!==false?'checked':''} style="width:16px;height:16px">
+        <span>Tenant activo <span style="color:var(--muted)">(destildar suspende el acceso de inmediato)</span></span>
+      </label>
+    </div>
+    <div class="modal-footer">
+      <button class="tbtn" onclick="guardarPlan('${tenantId}')">Guardar</button>
+      <button class="tbtn" onclick="document.getElementById('modalBg').style.display='none'">Cancelar</button>
+    </div>`
+  document.getElementById('modalBg').style.display = 'flex'
+}
+
+function extenderDias(inputId, dias) {
+  const input = document.getElementById(inputId)
+  const actual = input.value ? new Date(input.value + 'T00:00:00') : null
+  const now = new Date()
+  const base = (actual && actual > now) ? actual : now
+  base.setDate(base.getDate() + dias)
+  input.value = base.toISOString().slice(0,10)
+}
+
+async function guardarPlan(tenantId) {
+  const row = allClientes.find(r => r.tenant_id === tenantId)
+  const plan = document.getElementById('planSelect').value
+  const trialVence = document.getElementById('trialVenceInput').value || null
+  const planVence = document.getElementById('planVenceInput').value || null
+  const activo = document.getElementById('activoCheck').checked
+  if (row && row.activo !== false && !activo) {
+    if (!confirm(`¿Suspender el acceso de "${row.empresa}" ahora mismo? Sus usuarios no van a poder loguearse hasta que lo reactives.`)) return
+  }
+  const r = await fetch(`${API}/superadmin/tenants/${tenantId}/plan`, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json', 'x-sa-token': getToken() },
+    body: JSON.stringify({ plan, trialVence, planVence, activo }),
+  }).then(r => r.json()).catch(() => ({}))
+  if (r.ok) {
+    showToast('Plan actualizado ✅', 'ok')
+    document.getElementById('modalBg').style.display = 'none'
+    if (row) Object.assign(row, r.tenant)
+    renderTable()
+  } else {
+    showToast(r.message || 'Error al guardar', 'err')
+  }
+}
+
+// ════════════════════════════════════════════
+//  EXPORT CSV
+// ════════════════════════════════════════════
+function exportCSV(tipo) {
+  window.location.href = `${API}/superadmin/export?token=${getToken()}`
+  showToast('Descargando CSV...', 'ok')
+}
+
+// ════════════════════════════════════════════
+//  IMPORT CSV
+// ════════════════════════════════════════════
+function handleDrop(e) {
+  e.preventDefault()
+  document.getElementById('dropZone').classList.remove('drag')
+  const file = e.dataTransfer.files[0]
+  if (file) handleFile(file)
+}
+
+let importData = null
+
+function handleFile(file) {
+  if (!file || !file.name.endsWith('.csv')) {
+    showToast('Solo archivos CSV', 'err'); return
+  }
+  document.getElementById('dropZone').innerHTML =
+    `<div class="drop-icon">✅</div><div>${file.name}</div><div style="font-size:11px;margin-top:4px;color:var(--muted)">${(file.size/1024).toFixed(1)} KB</div>`
+
+  const reader = new FileReader()
+  reader.onload = e => {
+    const lines = e.target.result.split('\n').filter(l => l.trim())
+    const cols = lines[0].split(',').map(c => c.trim().replace(/"/g,''))
+    const rows = lines.slice(1,11).map(l => {
+      const vals = l.split(',').map(v => v.trim().replace(/"/g,''))
+      return Object.fromEntries(cols.map((c,i) => [c, vals[i]||'']))
+    })
+    importData = { cols, rows, raw: e.target.result }
+    renderPreview(cols, rows)
+    document.getElementById('btnImport').disabled = false
+  }
+  reader.readAsText(file, 'utf-8')
+}
+
+function renderPreview(cols, rows) {
+  document.getElementById('previewWrap').style.display = 'block'
+  document.getElementById('previewHead').innerHTML =
+    '<tr>' + cols.map(c => `<th>${c}</th>`).join('') + '</tr>'
+  document.getElementById('previewBody').innerHTML =
+    rows.map(r => '<tr>' + cols.map(c => `<td>${r[c]||''}</td>`).join('') + '</tr>').join('')
+}
+
+function doImport() {
+  const tenantId = document.getElementById('tenantDestino').value
+  if (!tenantId) { showToast('Seleccioná un tenant primero', 'err'); return }
+  if (!importData) { showToast('Cargá un CSV primero', 'err'); return }
+  // Aquí se enviaría al endpoint ERP para importar productos
+  // Por ahora mostrar confirmación
+  showToast(`Importando ${importData.rows.length} filas al tenant...`, 'ok')
+  // TODO: fetch(`${ERP_API}/superadmin/import`, { method:'POST', body: JSON.stringify({tenantId, data: importData}) })
+}
+
+// ════════════════════════════════════════════
+//  PLANTILLAS CSV
+// ════════════════════════════════════════════
+const templates = {
+  'productos': 'nombre,sku,descripcion,precio_costo,precio_venta,stock,stock_minimo,categoria,proveedor\n"Producto Ejemplo","SKU-001","Descripción del producto",1000,1500,50,5,"Categoría","Proveedor S.A."',
+  'clientes': 'nombre,email,tel,direccion,ciudad,cuit,tipo,notas\n"Cliente Ejemplo","cliente@mail.com","+54911xxxx","Av. Ejemplo 123","Buenos Aires","20-12345678-9","B2B","Cliente VIP"',
+  'proveedores': 'nombre,email,tel,direccion,cuit,contacto,notas\n"Proveedor S.A.","proveedor@mail.com","+54911xxxx","Av. Industrial 456","30-87654321-0","Juan García","Proveedor principal"',
+  'lista-precios': 'sku,nombre,precio_lista,precio_contado,precio_mayorista\n"SKU-001","Producto","1500","1350","1100"',
+}
+
+function downloadTemplate(tipo) {
+  const csv = "\uFEFF" + templates[tipo] // BOM para Excel
+  const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' })
+  const url = URL.createObjectURL(blob)
+  const a = document.createElement('a')
+  a.href = url; a.download = `plantilla_${tipo}.csv`; a.click()
+  URL.revokeObjectURL(url)
+  showToast('Plantilla descargada', 'ok')
+}
+
+// ════════════════════════════════════════════
+//  TOAST
+// ════════════════════════════════════════════
+let toastTimer = null
+function showToast(msg, type = 'ok') {
+  const t = document.getElementById('toast')
+  t.textContent = msg
+  t.className = 'toast toast-' + type + ' show'
+  if (toastTimer) clearTimeout(toastTimer)
+  toastTimer = setTimeout(() => t.classList.remove('show'), 3000)
+}
+</script>
+</body>
+</html>

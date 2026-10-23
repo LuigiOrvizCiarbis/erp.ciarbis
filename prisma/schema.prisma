@@ -1,0 +1,2174 @@
+// ─────────────────────────────────────────────────────────────
+//  BIMS ERP — Prisma Schema
+//  Multi-tenant SaaS · PostgreSQL
+//  Versión: 1.0.0
+// ─────────────────────────────────────────────────────────────
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ═══════════════════════════════════════════════════════════
+//  BLOQUE 1 — MULTI-TENANCY & AUTH
+// ═══════════════════════════════════════════════════════════
+
+// Cada empresa es un tenant independiente.
+// tenant_id está presente en TODAS las tablas operativas.
+// Row-Level Security de PostgreSQL refuerza el aislamiento a nivel DB.
+
+model Tenant {
+  id        String  @id @default(cuid())
+  nombre    String
+  slug      String  @unique // ej. "ferreteria-molina" → ferreteria-molina.bimserp.app
+  cuit      String?
+  email     String
+  tel       String?
+  direccion String?
+  logo      String? // URL a S3/R2
+  moneda    String  @default("ARS")
+  timezone  String  @default("America/Argentina/Buenos_Aires")
+
+  // Facturación fiscal
+  condIVA String? // "Responsable Inscripto", "Monotributista", etc.
+  ptoVta  String  @default("0001") // Punto de venta ARCA/AFIP
+  iibb    String? // Ingresos Brutos
+
+  // Configuración facturación
+  facAutoEnabled Boolean @default(false) // Toggle facturación automática
+  facTipoDefault String  @default("X") // "X" o "FC"
+
+  // Onboarding / gating de módulos
+  rubro          String? // slug de industria elegido en el registro (ver src/lib/modulos.js)
+  modulosActivos String[] @default([]) // ids de módulos habilitados para este tenant
+
+  // Plan SaaS
+  plan       PlanTipo  @default(STARTER)
+  planVence  DateTime?
+  trialVence DateTime?
+  stripeId   String? // ID en Stripe/MercadoPago para billing
+
+  activo   Boolean  @default(true)
+  creadoEn DateTime @default(now())
+  actuEn   DateTime @updatedAt
+
+  // Contadores para numeración correlativa legible por tenant (Categoria/Proveedor/Producto.numero) —
+  // incrementados dentro de la misma transacción de alta, no se exponen directamente en la UI.
+  seqCategorias  Int @default(0)
+  seqProveedores Int @default(0)
+  seqProductos   Int @default(0)
+  seqTaller      Int @default(0) // OrdenTaller.numero (módulo Taller, V2.102.0)
+
+  // Relaciones
+  users           User[]
+  sucursales      Sucursal[]
+  productos       Producto[]
+  clientes        Cliente[]
+  proveedores     Proveedor[]
+  ordVentas       OrdenVenta[]
+  ordCompras      OrdenCompra[]
+  tickets         Ticket[]
+  movimientos     MovimientoStock[]
+  configuraciones ConfiguracionEmpresa[]
+  integraciones   Integracion[]
+  razonesSociales RazonSocial[]
+  empleados       Empleado[]
+  roles           Rol[]
+  cotizacionDolar CotizacionDolar?
+  ticketsSoporte  TicketSoporte[]
+
+  @@index([slug])
+  @@map("tenants")
+}
+
+enum PlanTipo {
+  TRIAL
+  STARTER
+  PROFESIONAL
+  ENTERPRISE
+}
+
+// ───────────────────────────────────────────────────────────
+//  USUARIOS & ROLES
+// ───────────────────────────────────────────────────────────
+
+model User {
+  id       String @id @default(cuid())
+  tenantId String
+  tenant   Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  nombre   String
+  email    String
+  passHash String // bcrypt hash — NUNCA texto plano
+  rol      RolUsuario @default(VENDEDOR)
+  avatar   String? // iniciales o URL de foto
+  activo   Boolean    @default(true)
+
+  sucursalId String? // sucursal asignada (null = acceso a todas, ej. ADMIN)
+  sucursal   Sucursal? @relation(fields: [sucursalId], references: [id])
+
+  // Rol personalizado (RBAC) — si está seteado, sus permisos ganan sobre el default del enum `rol`.
+  // El enum se mantiene para no romper tenants que nunca toquen la feature de roles configurables.
+  rolId     String?
+  rolCustom Rol?    @relation(fields: [rolId], references: [id])
+
+  // Seguridad
+  ultimoAcceso    DateTime?
+  resetToken      String? // token para recupero de contraseña
+  resetTokenExp   DateTime?
+  emailVerificado Boolean   @default(false) // informativo, no bloquea el login
+  emailVerifToken String?   @unique
+  mfaSecret       String? // TOTP secret para 2FA (futuro)
+  mfaActivo       Boolean   @default(false)
+
+  creadoEn DateTime @default(now())
+  actuEn   DateTime @updatedAt
+
+  // Relaciones
+  sesiones          Sesion[]
+  ordVentas         OrdenVenta[]
+  ordCompras        OrdenCompra[]
+  tickets           Ticket[]
+  movimientos       MovimientoStock[]
+  auditLogs         AuditLog[]
+  cajaSesiones      CajaSesion[]
+  empleado          Empleado?
+  gastos            Gasto[]
+  ingresos          Ingreso[]
+  pagosProveedor    PagoProveedor[]
+  pagosCliente      PagoCliente[]
+  movimientosCuenta MovimientoCuentaInterna[]
+  pagosPlanCliente  PagoPlanCliente[]
+  ticketsSoporte    TicketSoporte[]
+
+  @@unique([tenantId, email])
+  @@index([tenantId])
+  @@index([email])
+  @@index([sucursalId])
+  @@map("users")
+}
+
+enum RolUsuario {
+  ADMIN
+  VENDEDOR
+  DEPOSITO
+  CONTADOR
+  PRODUCCION
+  LOGISTICA
+}
+
+// Rol configurable (RBAC) — coexiste con el enum RolUsuario de arriba.
+// `esSistema=true` = uno de los 6 roles fijos, sembrado 1:1 por tenant para no cambiar
+// el comportamiento default; `esSistema=false` = rol custom creado por el tenant, normalmente
+// clonado de uno de sistema y editado. `permisos` es { [moduloKey]: {ver,crear,editar,eliminar} }.
+model Rol {
+  id       String @id @default(cuid())
+  tenantId String
+  tenant   Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  nombre    String
+  esSistema Boolean  @default(false)
+  permisos  Json
+  activo    Boolean  @default(true)
+  creadoEn  DateTime @default(now())
+
+  usuarios User[]
+
+  @@unique([tenantId, nombre])
+  @@index([tenantId])
+  @@map("roles")
+}
+
+model Sesion {
+  id     String @id @default(cuid())
+  userId String
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  token     String   @unique // JWT jti (ID único del token)
+  userAgent String?
+  ip        String?
+  expiresAt DateTime
+  activa    Boolean  @default(true)
+  creadoEn  DateTime @default(now())
+
+  @@index([userId])
+  @@index([token])
+  @@map("sesiones")
+}
+
+// ═══════════════════════════════════════════════════════════
+//  BLOQUE 2 — ESTRUCTURA ORGANIZACIONAL
+// ═══════════════════════════════════════════════════════════
+
+model Sucursal {
+  id       String @id @default(cuid())
+  tenantId String
+  tenant   Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  nombre      String
+  codigo      String? // ej. "SUC-01"
+  direccion   String?
+  tel         String?
+  email       String?
+  esPrincipal Boolean  @default(false)
+  activa      Boolean  @default(true)
+  creadoEn    DateTime @default(now())
+
+  // Relaciones
+  productos    ProductoSucursal[] // stock por sucursal
+  variantes    VarianteSucursal[] // stock por sucursal de cada variante
+  usuarios     User[]
+  ordVentas    OrdenVenta[]
+  tickets      Ticket[]
+  cajaSesiones CajaSesion[]
+  gastos       Gasto[]
+  ingresos     Ingreso[]
+  pagosPlan    PagoPlanCliente[]
+
+  @@unique([tenantId, codigo])
+  @@index([tenantId])
+  @@map("sucursales")
+}
+
+// ═══════════════════════════════════════════════════════════
+//  BLOQUE 3 — CATÁLOGOS: PRODUCTOS, CLIENTES, PROVEEDORES
+// ═══════════════════════════════════════════════════════════
+
+model Categoria {
+  id          String   @id @default(cuid())
+  tenantId    String
+  numero      Int      @default(0) // correlativo legible por tenant, ver Tenant.seqCategorias
+  nombre      String
+  descripcion String?
+  color       String? // hex para UI
+  activa      Boolean  @default(true)
+  creadoEn    DateTime @default(now())
+
+  // Jerarquía opcional hasta 4 niveles (validado en la API, no acá) — rubro → marca → categoría
+  // → sub-categoría, con las etiquetas de cada nivel configurables por tenant (ver kv
+  // "categorias.nivelLabels"). parentId null = nivel 1 (raíz).
+  parentId String?
+  parent   Categoria?  @relation("CategoriaJerarquia", fields: [parentId], references: [id], onDelete: Cascade)
+  hijos    Categoria[] @relation("CategoriaJerarquia")
+
+  productos     Producto[]
+  margenesLista ListaPrecioMargen[]
+
+  @@unique([tenantId, parentId, nombre])
+  @@index([tenantId])
+  @@index([parentId])
+  @@map("categorias")
+}
+
+// Lista de precios: distintos niveles de margen ganancial bruto sobre el costo, por categoría.
+// "esDefault" es la lista de consumidor final — no recalcula precioVenta en ningún lado de la
+// app (Inventario/etiquetas/reportes siguen usando Producto.precioVenta tal cual); solo las
+// listas NO default cambian el precio de línea en el momento de la venta en PoS (ver pos_calcular_totales).
+model ListaPrecio {
+  id        String   @id @default(cuid())
+  tenantId  String
+  nombre    String
+  esDefault Boolean  @default(false)
+  activa    Boolean  @default(true)
+  creadoEn  DateTime @default(now())
+
+  margenes ListaPrecioMargen[]
+  clientes Cliente[]
+
+  @@unique([tenantId, nombre])
+  @@index([tenantId])
+  @@map("listas_precio")
+}
+
+// Un margen % por categoría dentro de una lista (categoriaId null = margen default de esa lista,
+// para productos sin categoría o sin margen específico cargado).
+model ListaPrecioMargen {
+  id            String      @id @default(cuid())
+  tenantId      String
+  listaPrecioId String
+  listaPrecio   ListaPrecio @relation(fields: [listaPrecioId], references: [id], onDelete: Cascade)
+  categoriaId   String?
+  categoria     Categoria?  @relation(fields: [categoriaId], references: [id])
+  margenPct     Decimal     @db.Decimal(6, 2)
+
+  @@unique([listaPrecioId, categoriaId])
+  @@index([tenantId])
+  @@map("lista_precio_margenes")
+}
+
+// Cupón de descuento — solo el admin los crea/edita. Cada cupón decide si su descuento se
+// combina o no con el descuento total manual del PoS, y si se combina o no con el descuento
+// que el cliente ya tiene por su cuenta (Cliente.descuento o la lista de precios asignada).
+// El conteo de usos (total y por cliente) se hace contando Ticket.cuponId — no hace falta
+// una tabla de log aparte.
+model Cupon {
+  id                         String             @id @default(cuid())
+  tenantId                   String
+  codigo                     String
+  tipo                       TipoDescuentoCupon @default(PORCENTAJE)
+  valor                      Decimal            @db.Decimal(10, 2)
+  fechaDesde                 DateTime?
+  fechaHasta                 DateTime?
+  montoMinimoCompra          Decimal?           @db.Decimal(15, 2)
+  usosMax                    Int?
+  usosMaxPorCliente          Int?
+  combinaConDescuentoManual  Boolean            @default(false)
+  combinaConDescuentoCliente Boolean            @default(false)
+  activo                     Boolean            @default(true)
+  creadoEn                   DateTime           @default(now())
+
+  @@unique([tenantId, codigo])
+  @@index([tenantId])
+  @@map("cupones")
+}
+
+enum TipoDescuentoCupon {
+  PORCENTAJE
+  MONTO
+}
+
+// Fidelización — configuración general (1 fila por tenant) + reglas de bonificación que
+// multiplican los puntos base cuando se cumple alguna condición (producto, categoría, día de
+// semana, horario o monto mínimo de la compra). Si matchean varias reglas a la vez, se usa la
+// de multiplicador más alto (no se apilan, para que sea fácil de auditar y de explicarle al
+// cliente por qué ganó tantos puntos).
+model ConfiguracionPuntos {
+  id                 String   @id @default(cuid())
+  tenantId           String   @unique
+  activo             Boolean  @default(false)
+  puntosPorMonto     Decimal  @default(0) @db.Decimal(10, 4) // puntos que otorga cada $1 gastado
+  compraMinima       Decimal? @db.Decimal(15, 2)
+  puntosMaxPorCompra Int?
+
+  @@map("configuracion_puntos")
+}
+
+model ReglaBonusPuntos {
+  id            String         @id @default(cuid())
+  tenantId      String
+  tipo          TipoReglaBonus
+  productoId    String?
+  categoriaId   String?
+  diaSemana     Int? // 0=domingo … 6=sábado
+  horaDesde     String? // "HH:MM"
+  horaHasta     String? // "HH:MM"
+  montoMinimo   Decimal?       @db.Decimal(15, 2)
+  multiplicador Decimal        @default(2) @db.Decimal(5, 2)
+  activo        Boolean        @default(true)
+  creadoEn      DateTime       @default(now())
+
+  @@index([tenantId])
+  @@map("reglas_bonus_puntos")
+}
+
+enum TipoReglaBonus {
+  PRODUCTO
+  CATEGORIA
+  DIA_SEMANA
+  HORARIO
+  MONTO_MINIMO
+}
+
+model Producto {
+  id       String @id @default(cuid())
+  tenantId String
+  tenant   Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  numero   Int    @default(0) // correlativo legible por tenant, ver Tenant.seqProductos
+
+  categoriaId String?
+  categoria   Categoria? @relation(fields: [categoriaId], references: [id])
+
+  proveedorId String? // proveedor preferido/habitual (informativo, no ata las OC)
+  proveedor   Proveedor? @relation(fields: [proveedorId], references: [id])
+
+  sku          String
+  codigoBarras String? // EAN/UPC para lectura con lector USB (distinto del SKU interno)
+  nombre       String
+  descripcionCorta String? // teaser/resumen para tarjeta de producto en e-commerce
+  descripcion  String? // descripción larga — detalle del producto en e-commerce
+  um           String    @default("unidad") // unidad, kg, litro, metro, caja, etc.
+  ventaPorPeso Boolean   @default(false) // si true, el PoS pide gramos en vez de sumar 1 unidad
+  vencimiento  DateTime? // vencimiento "típico" del producto, separado del fechaVenc por lote
+
+  // Precios
+  precioCosto Decimal @default(0) @db.Decimal(15, 2)
+  precioVenta Decimal @default(0) @db.Decimal(15, 2)
+  // Moneda en la que están cargados precioCosto/precioVenta (y los de sus variantes): 'ARS' o
+  // 'USD' (V2.106.0). En USD el sistema los muestra y cobra en pesos con la cotización default
+  // del tenant del momento — ver src/lib/moneda.js. Lo guardado nunca se reescribe al convertir.
+  moneda      String  @default("ARS")
+  impuesto    Decimal @default(21) @db.Decimal(5, 2) // % IVA
+
+  // Stock global (consolidado de todas las sucursales)
+  stock    Decimal  @default(0) @db.Decimal(15, 3)
+  stockMin Decimal  @default(0) @db.Decimal(15, 3)
+  stockMax Decimal? @db.Decimal(15, 3)
+
+  // Trazabilidad
+  usaLotes Boolean @default(false)
+  usaSerie Boolean @default(false)
+
+  // E-commerce
+  publicadoWeb Boolean  @default(false)
+  imagenes     String[] // array de URLs
+
+  activo   Boolean  @default(true)
+  creadoEn DateTime @default(now())
+  actuEn   DateTime @updatedAt
+
+  // Relaciones
+  stockSucursales ProductoSucursal[]
+  lotes           Lote[]
+  lineasOV        LineaOrdenVenta[]
+  lineasOC        LineaOrdenCompra[]
+  lineasTicket    LineaTicket[]
+  movimientos     MovimientoStock[]
+  lineasOT        LineaOrdenTrabajo[] // producción
+  variantes       ProductoVariante[]
+  proveedoresCosto ProductoProveedor[] // costo recordado por proveedor, ver modelo ProductoProveedor
+
+  @@unique([tenantId, sku])
+  @@unique([tenantId, codigoBarras])
+  @@index([tenantId])
+  @@index([tenantId, activo])
+  @@map("productos")
+}
+
+// Combinación puntual (talle/color/tamaño) de un producto — stock y precio propios,
+// independientes del producto base. No pasa por el sistema de Lote/trazabilidad.
+model ProductoVariante {
+  id         String   @id @default(cuid())
+  tenantId   String
+  productoId String
+  producto   Producto @relation(fields: [productoId], references: [id], onDelete: Cascade)
+
+  // Reemplaza las 3 columnas fijas talle/color/tamano — cada tenant define sus propios campos
+  // de variante (ver CampoVariante) y acá se guarda {clave: valor}, ej. {"talle":"M","color":"Rojo"}
+  // o {"peso":"500g","gusto":"Chocolate"} para un tenant que no usa talle/color.
+  valores Json @default("{}")
+
+  sku          String
+  codigoBarras String?
+  imagen       String? // null = hereda la imagen de portada del producto (Producto.imagenes[0])
+
+  precioCosto Decimal? @db.Decimal(15, 2) // null = hereda el costo del producto base
+  precioVenta Decimal? @db.Decimal(15, 2) // null = hereda el precio del producto base
+  stock       Decimal  @default(0) @db.Decimal(15, 3)
+
+  activo         Boolean  @default(true) // false = "pausada" (no vende, pero se puede reactivar)
+  tuvoMovimiento Boolean  @default(false) // se vendió o se le tocó el stock alguna vez — si es true, no se puede eliminar (solo pausar)
+  creadoEn       DateTime @default(now())
+
+  stockSucursales VarianteSucursal[]
+
+  @@unique([tenantId, sku])
+  @@index([tenantId, productoId])
+  @@map("producto_variantes")
+}
+
+// Stock de una variante en una sucursal — mismo criterio que ProductoSucursal: el stock de la
+// variante (ProductoVariante.stock) es siempre la suma de sus filas acá (lo mantiene
+// src/lib/stock.js, nunca se escribe a mano por separado).
+model VarianteSucursal {
+  id         String           @id @default(cuid())
+  varianteId String
+  variante   ProductoVariante @relation(fields: [varianteId], references: [id], onDelete: Cascade)
+  sucursalId String
+  sucursal   Sucursal         @relation(fields: [sucursalId], references: [id], onDelete: Cascade)
+
+  stock Decimal @default(0) @db.Decimal(15, 3)
+
+  // Ubicación en el depósito de esta sucursal (V2.105.0) — vacío = hereda la del producto,
+  // nivel por nivel (ej. misma góndola y estante que el producto, otro cajón).
+  pasillo String?
+  estante String?
+  cajon   String?
+
+  actuEn DateTime @updatedAt
+
+  @@unique([varianteId, sucursalId])
+  @@index([sucursalId])
+  @@map("variantes_sucursales")
+}
+
+// Catálogo de "dimensiones" de variante por tenant (ej. Talle/Color para indumentaria,
+// Peso/Gusto para una dietética) — reemplaza los 3 campos fijos que tenía ProductoVariante.
+// `clave` es el identificador estable usado como key en ProductoVariante.valores; `label` es
+// el nombre visible, editable sin romper el vínculo. `opciones` es un catálogo JSON de valores
+// ya usados (mismo patrón "+agregar" que ya existía para talles/colores).
+model CampoVariante {
+  id       String   @id @default(cuid())
+  tenantId String
+  clave    String
+  label    String
+  opciones String? // JSON array de valores sugeridos
+  activo   Boolean  @default(true) // false = oculto (no se borra, para no perder qué variantes lo usan)
+  orden    Int      @default(0)
+  creadoEn DateTime @default(now())
+
+  @@unique([tenantId, clave])
+  @@index([tenantId])
+  @@map("campos_variante")
+}
+
+// Stock de un producto en una sucursal específica. Producto.stock = suma de estas filas
+// (lo mantiene src/lib/stock.js en cada movimiento).
+model ProductoSucursal {
+  id         String   @id @default(cuid())
+  productoId String
+  producto   Producto @relation(fields: [productoId], references: [id], onDelete: Cascade)
+  sucursalId String
+  sucursal   Sucursal @relation(fields: [sucursalId], references: [id], onDelete: Cascade)
+
+  stock     Decimal @default(0) @db.Decimal(15, 3)
+  stockMin  Decimal @default(0) @db.Decimal(15, 3)
+  ubicacion String? // legado, nunca se usó — la ubicación real son los 3 campos de abajo
+
+  // Ubicación en el depósito de esta sucursal (V2.105.0) — texto libre, ej. P1 / E3 / C102.
+  // Los nombres visibles de cada nivel se configuran en Configuración > Variantes.
+  pasillo String?
+  estante String?
+  cajon   String?
+
+  actuEn DateTime @updatedAt
+
+  @@unique([productoId, sucursalId])
+  @@map("productos_sucursales")
+}
+
+// Lotes para trazabilidad y control de vencimientos (FEFO)
+model Lote {
+  id         String   @id @default(cuid())
+  tenantId   String
+  productoId String
+  producto   Producto @relation(fields: [productoId], references: [id], onDelete: Cascade)
+
+  nroLote        String
+  cantidad       Decimal   @db.Decimal(15, 3)
+  cantDisponible Decimal   @db.Decimal(15, 3)
+  fechaElab      DateTime?
+  fechaVenc      DateTime?
+  proveedor      String?
+  observaciones  String?
+  activo         Boolean   @default(true)
+  creadoEn       DateTime  @default(now())
+
+  @@unique([tenantId, productoId, nroLote])
+  @@index([tenantId])
+  @@index([productoId])
+  @@index([fechaVenc]) // para alertas de vencimiento
+  @@map("lotes")
+}
+
+// ───────────────────────────────────────────────────────────
+//  CLIENTES
+// ───────────────────────────────────────────────────────────
+
+model Cliente {
+  id       String @id @default(cuid())
+  tenantId String
+  tenant   Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  nombre      String
+  razonSocial String?
+  cuit        String?
+  dni         String?
+  condIVA     String      @default("Consumidor Final")
+  tipo        TipoCliente @default(MINORISTA)
+  empresa     String? // empresa a la que pertenece el cliente (contacto corporativo)
+  rubro       String? // rubro/industria del cliente, texto libre por tenant
+
+  // Contacto
+  email     String?
+  tel       String?
+  whatsapp  String?
+  direccion String?
+  ciudad    String?
+  provincia String?
+  pais      String  @default("Argentina")
+
+  // Cuenta corriente
+  limiteCred Decimal? @db.Decimal(15, 2)
+  saldo      Decimal  @default(0) @db.Decimal(15, 2) // negativo = debe
+
+  // Facturación
+  emailFac          String? // email para envío de facturas
+  condPago          String               @default("Contado")
+  descuento         Decimal?             @default(0) @db.Decimal(5, 2) // % (o irrelevante si descuentoTipo=COSTO) aplicado automático en el PoS
+  descuentoTipo     TipoDescuentoCliente @default(PORCENTAJE) // COSTO = paga precioCosto de cada línea, ignora `descuento`
+  listaPrecioId     String?
+  listaPrecio       ListaPrecio?         @relation(fields: [listaPrecioId], references: [id])
+  esConsumidorFinal Boolean              @default(false) // marca el cliente "genérico" auto-creado por tenant, evita duplicados
+
+  // Fidelización (puntos) — cumpleDia/cumpleMes separados de anioNacimiento a propósito: el
+  // cliente puede querer avisar su cumpleaños sin decir la edad.
+  puntos         Int  @default(0)
+  cumpleDia      Int?
+  cumpleMes      Int?
+  anioNacimiento Int?
+
+  activo   Boolean  @default(true)
+  creadoEn DateTime @default(now())
+  actuEn   DateTime @updatedAt
+
+  ordVentas OrdenVenta[]
+  tickets   Ticket[]
+  planes    PlanCliente[]
+  ingresos  Ingreso[]
+  pagos     PagoCliente[]
+
+  @@index([tenantId])
+  @@index([tenantId, cuit])
+  @@map("clientes")
+}
+
+enum TipoCliente {
+  MINORISTA
+  MAYORISTA
+  EMPRESA
+  GOBIERNO
+}
+
+enum TipoDescuentoCliente {
+  PORCENTAJE
+  COSTO
+}
+
+// ───────────────────────────────────────────────────────────
+//  PROVEEDORES
+// ───────────────────────────────────────────────────────────
+
+model Proveedor {
+  id       String @id @default(cuid())
+  tenantId String
+  tenant   Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  numero   Int    @default(0) // correlativo legible por tenant, ver Tenant.seqProveedores
+
+  nombre      String
+  razonSocial String?
+  cuit        String?
+  condIVA     String  @default("Responsable Inscripto")
+
+  // Contacto
+  email     String?
+  tel       String?
+  direccion String?
+
+  // Condiciones comerciales
+  condPago String  @default("30 días")
+  saldo    Decimal @default(0) @db.Decimal(15, 2) // negativo = les debemos
+
+  activo   Boolean  @default(true)
+  creadoEn DateTime @default(now())
+  actuEn   DateTime @updatedAt
+
+  ordCompras OrdenCompra[]
+  productos  Producto[]
+  pagos      PagoProveedor[]
+  costos     ProductoProveedor[]
+
+  @@index([tenantId])
+  @@map("proveedores")
+}
+
+// Costo recordado de un producto según a qué proveedor se lo compraste — comodidad para el
+// caso real de "le compro a A cuando tiene stock, y a B cuando A no tiene": en vez de tener que
+// re-tipear el costo cada vez que volvés a comprarle a A, queda guardado. `preferido` (único
+// por producto, no checkbox múltiple) marca cuál de los proveedores es la fuente vigente HOY —
+// cambiar el preferido actualiza Producto.precioCosto al costo recordado de ese proveedor.
+// Se actualiza solo (upsert) cada vez que se recibe mercadería con proveedor conocido, tanto
+// por Orden de Compra como por "Recepción por código" — también se puede cargar/editar a mano
+// desde la ficha del producto, sin necesidad de haber comprado antes.
+model ProductoProveedor {
+  id         String   @id @default(cuid())
+  tenantId   String
+  productoId String
+  producto   Producto @relation(fields: [productoId], references: [id], onDelete: Cascade)
+  proveedorId String
+  proveedor  Proveedor @relation(fields: [proveedorId], references: [id], onDelete: Cascade)
+
+  ultimoCosto  Decimal   @db.Decimal(15, 2)
+  ultimaCompra DateTime?
+  preferido    Boolean   @default(false)
+
+  creadoEn DateTime @default(now())
+  actuEn   DateTime @updatedAt
+
+  @@unique([tenantId, productoId, proveedorId])
+  @@index([tenantId, productoId])
+  @@map("producto_proveedores")
+}
+
+// Ticket de soporte enviado desde el chat flotante (Ayuda/Soporte) — llega al panel
+// /superadmin, no es un chat en vivo, es un mensaje que alguien de soporte responde después
+// por fuera del sistema (WhatsApp/email), mismo criterio que el resto de /superadmin (no hay
+// infraestructura de mensajería en tiempo real en este proyecto).
+model TicketSoporte {
+  id       String @id @default(cuid())
+  tenantId String
+  tenant   Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  userId   String
+  usuario  User   @relation(fields: [userId], references: [id])
+
+  mensaje String
+  estado  EstadoTicketSoporte @default(ABIERTO)
+
+  creadoEn DateTime @default(now())
+  actuEn   DateTime @updatedAt
+
+  @@index([tenantId])
+  @@index([estado])
+  @@map("tickets_soporte")
+}
+
+enum EstadoTicketSoporte {
+  ABIERTO
+  RESUELTO
+}
+
+// ═══════════════════════════════════════════════════════════
+//  BLOQUE 4 — VENTAS
+// ═══════════════════════════════════════════════════════════
+
+model OrdenVenta {
+  id       String @id @default(cuid())
+  tenantId String
+  tenant   Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  nro       Int // autoincremental por tenant
+  clienteId String? // null = venta mostrador / consumidor final sin registrar
+  cliente   Cliente? @relation(fields: [clienteId], references: [id])
+  usuarioId String
+  usuario   User     @relation(fields: [usuarioId], references: [id])
+
+  sucursalId String?
+  sucursal   Sucursal? @relation(fields: [sucursalId], references: [id])
+
+  fecha         DateTime  @default(now())
+  fechaEntrega  DateTime?
+  observaciones String?
+
+  // Totales (desnormalizados para performance en listados)
+  subtotal  Decimal @db.Decimal(15, 2)
+  descuento Decimal @default(0) @db.Decimal(15, 2)
+  impuestos Decimal @default(0) @db.Decimal(15, 2)
+  total     Decimal @db.Decimal(15, 2)
+
+  estado EstadoOV @default(PENDIENTE)
+
+  creadoEn DateTime @default(now())
+  actuEn   DateTime @updatedAt
+
+  lineas  LineaOrdenVenta[]
+  tickets Ticket[]
+
+  @@unique([tenantId, nro])
+  @@index([tenantId])
+  @@index([tenantId, estado])
+  @@index([clienteId])
+  @@map("ordenes_venta")
+}
+
+enum EstadoOV {
+  BORRADOR
+  PENDIENTE
+  APROBADA
+  ENVIADA
+  ENTREGADA
+  CANCELADA
+}
+
+model LineaOrdenVenta {
+  id         String     @id @default(cuid())
+  ordenId    String
+  orden      OrdenVenta @relation(fields: [ordenId], references: [id], onDelete: Cascade)
+  productoId String
+  producto   Producto   @relation(fields: [productoId], references: [id])
+
+  descripcion String // snapshot del nombre al momento de venta
+  cantidad    Decimal @db.Decimal(15, 3)
+  precioUnit  Decimal @db.Decimal(15, 2)
+  descuento   Decimal @default(0) @db.Decimal(5, 2) // %
+  impuesto    Decimal @default(21) @db.Decimal(5, 2) // % IVA
+  subtotal    Decimal @db.Decimal(15, 2)
+
+  @@index([ordenId])
+  @@map("lineas_orden_venta")
+}
+
+// ═══════════════════════════════════════════════════════════
+//  BLOQUE 5 — COMPRAS
+// ═══════════════════════════════════════════════════════════
+
+model OrdenCompra {
+  id       String @id @default(cuid())
+  tenantId String
+  tenant   Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  nro         Int
+  proveedorId String
+  proveedor   Proveedor @relation(fields: [proveedorId], references: [id])
+  usuarioId   String
+  usuario     User      @relation(fields: [usuarioId], references: [id])
+
+  fecha         DateTime  @default(now())
+  fechaEntrega  DateTime?
+  observaciones String?
+
+  subtotal  Decimal @db.Decimal(15, 2)
+  impuestos Decimal @default(0) @db.Decimal(15, 2)
+  total     Decimal @db.Decimal(15, 2)
+
+  // Snapshot de cotización — se completa solo al crear, con la cotización default del tenant en
+  // ese momento (o el override puntual que mande el form) — nunca se recalcula después, así la
+  // evolución en USD refleja la cotización real de cada operación, no la de hoy.
+  cotizacionTipo  String?
+  cotizacionValor Decimal? @db.Decimal(10, 2)
+  montoUSD        Decimal? @db.Decimal(15, 2)
+
+  estado EstadoOC @default(BORRADOR)
+
+  // Forma de pago pedida por el usuario "al momento de la compra, no solo al pagar" (ver punto 6
+  // del pedido 2026-08-06) — ctaCte=true (default, preserva el comportamiento previo a este campo)
+  // suma directo a Proveedor.saldo al crear la orden; ctaCte=false paga en el momento desde Caja/
+  // Fondo/Transferencia Dueño (mismo FormaPagoInterno y mismo selector que Gasto/PagoProveedor) y
+  // no toca el saldo.
+  ctaCte           Boolean           @default(true)
+  formaPagoInterno FormaPagoInterno?
+  cajaSesionId     String?
+  cajaSesion       CajaSesion?       @relation(fields: [cajaSesionId], references: [id])
+
+  creadoEn DateTime @default(now())
+  actuEn   DateTime @updatedAt
+
+  lineas      LineaOrdenCompra[]
+  recepciones RecepcionMercaderia[]
+
+  @@unique([tenantId, nro])
+  @@index([tenantId])
+  @@index([tenantId, estado])
+  @@map("ordenes_compra")
+}
+
+enum EstadoOC {
+  BORRADOR
+  ENVIADA
+  CONFIRMADA
+  PARCIAL // recibida parcialmente
+  RECIBIDA
+  CANCELADA
+}
+
+model LineaOrdenCompra {
+  id         String      @id @default(cuid())
+  ordenId    String
+  orden      OrdenCompra @relation(fields: [ordenId], references: [id], onDelete: Cascade)
+  productoId String
+  producto   Producto    @relation(fields: [productoId], references: [id])
+
+  descripcion  String
+  cantidad     Decimal @db.Decimal(15, 3)
+  cantRecibida Decimal @default(0) @db.Decimal(15, 3)
+  precioUnit   Decimal @db.Decimal(15, 2)
+  impuesto     Decimal @default(21) @db.Decimal(5, 2)
+  subtotal     Decimal @db.Decimal(15, 2)
+
+  @@index([ordenId])
+  @@map("lineas_orden_compra")
+}
+
+// Registro de cada recepción parcial o total de una OC
+model RecepcionMercaderia {
+  id       String      @id @default(cuid())
+  tenantId String
+  ordenId  String
+  orden    OrdenCompra @relation(fields: [ordenId], references: [id])
+
+  fecha         DateTime @default(now())
+  observaciones String?
+
+  items RecepcionItem[]
+
+  @@index([tenantId])
+  @@index([ordenId])
+  @@map("recepciones_mercaderia")
+}
+
+model RecepcionItem {
+  id          String              @id @default(cuid())
+  recepcionId String
+  recepcion   RecepcionMercaderia @relation(fields: [recepcionId], references: [id], onDelete: Cascade)
+  productoId  String
+  cantidad    Decimal             @db.Decimal(15, 3)
+  loteId      String? // si el producto usa lotes
+
+  @@map("recepcion_items")
+}
+
+// ═══════════════════════════════════════════════════════════
+//  BLOQUE 6 — FACTURACIÓN (COMPROBANTES X + FACTURAS ARCA)
+//  Modelo central de BIMS ERP para el mercado argentino
+// ═══════════════════════════════════════════════════════════
+
+model Ticket {
+  id       String @id @default(cuid())
+  tenantId String
+  tenant   Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  nro       Int // correlativo por tenant
+  ordenId   String?
+  orden     OrdenVenta? @relation(fields: [ordenId], references: [id])
+  clienteId String?
+  cliente   Cliente?    @relation(fields: [clienteId], references: [id])
+  usuarioId String
+  usuario   User        @relation(fields: [usuarioId], references: [id])
+
+  sucursalId       String?
+  sucursal         Sucursal?   @relation(fields: [sucursalId], references: [id])
+  cajaSesionId     String?
+  cajaSesion       CajaSesion? @relation(fields: [cajaSesionId], references: [id])
+  medioPago        MedioPago?
+  medioPagoDetalle String? // nombre del método cuando medioPago=OTRO (métodos custom agregados por el tenant)
+  // Pago dividido en 2 métodos (ej. mitad efectivo, mitad QR) — [{medioPago, medioPagoDetalle?, monto}].
+  // Cuando está presente, medioPago/medioPagoDetalle de arriba quedan null (no hay "un" método
+  // único) y esto es la fuente de verdad; el arqueo de caja (POST /caja/:id/cerrar) reparte cada
+  // pierna a su propio medio en vez de sumar el total entero a uno solo.
+  pagosSplit Json?
+
+  // Razón social del tenant usada para facturar (si tiene más de una)
+  razonSocialId String?
+  razonSocial   RazonSocial? @relation(fields: [razonSocialId], references: [id])
+
+  // Nota de crédito: referencia al comprobante que se está acreditando/devolviendo.
+  // subtotal/impuestos/total y los de LineaTicket van en NEGATIVO para que se
+  // descuenten solos de cualquier suma (ej. el reporte de cierre de caja).
+  esNotaCredito  Boolean  @default(false)
+  ticketOrigenId String?
+  ticketOrigen   Ticket?  @relation("NotaCreditoOrigen", fields: [ticketOrigenId], references: [id])
+  notasCredito   Ticket[] @relation("NotaCreditoOrigen")
+
+  // Tipo de comprobante
+  tipo TipoComprobante @default(X)
+
+  // Datos del comprobante X (siempre presente)
+  fecha         DateTime @default(now())
+  subtotal      Decimal  @db.Decimal(15, 2)
+  impuestos     Decimal  @default(0) @db.Decimal(15, 2)
+  total         Decimal  @db.Decimal(15, 2)
+  observaciones String? // ej. motivo de la devolución
+
+  // Snapshot de cotización — mismo criterio que OrdenCompra (ver ese modelo para el comentario
+  // completo): se completa solo al crear, nunca se recalcula después.
+  cotizacionTipo  String?
+  cotizacionValor Decimal? @db.Decimal(10, 2)
+  montoUSD        Decimal? @db.Decimal(15, 2)
+
+  // Datos de factura electrónica (nullable hasta que se emite)
+  facturaEmitida Boolean   @default(false)
+  facturaFecha   DateTime?
+  facturaCAE     String? // Código de Autorización Electrónico ARCA
+  facturaCAEVto  DateTime? // vencimiento del CAE
+  facturaTipo    String? // "A", "B", "C", "M"
+  facturaPtoVta  String? // punto de venta usado
+  facturaNro     String? // número completo ej. "0001-00000321"
+  facturaQR      String? // URL/contenido del QR ARCA
+
+  // Cupón aplicado en esta venta (si hubo) — sin relación Prisma formal a Cupon (mismo criterio
+  // que ListaPrecio), alcanza con el id suelto para contar usos por cupón/por cliente.
+  cuponId             String?
+  descuentoCuponMonto Decimal? @db.Decimal(15, 2)
+
+  // Envíos
+  enviadoEmail  Boolean @default(false)
+  enviadoWA     Boolean @default(false)
+  emailEnviadoA String?
+  waEnviadoA    String?
+
+  estado EstadoTicket @default(EMITIDO)
+
+  creadoEn DateTime @default(now())
+  actuEn   DateTime @updatedAt
+
+  lineas LineaTicket[]
+
+  @@unique([tenantId, nro])
+  @@index([tenantId])
+  @@index([tenantId, tipo])
+  @@index([tenantId, facturaEmitida]) // para reportes discriminados
+  @@index([clienteId])
+  @@index([sucursalId])
+  @@index([cajaSesionId])
+  @@index([ticketOrigenId])
+  @@index([razonSocialId])
+  @@map("tickets")
+}
+
+// Un tenant puede facturar bajo más de una razón social (CUIT/punto de venta distintos)
+model RazonSocial {
+  id       String @id @default(cuid())
+  tenantId String
+  tenant   Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  nombre      String
+  cuit        String
+  condIVA     String   @default("Responsable Inscripto")
+  ptoVta      String   @default("0001")
+  esPrincipal Boolean  @default(false)
+  activa      Boolean  @default(true)
+  creadoEn    DateTime @default(now())
+
+  tickets Ticket[]
+
+  @@unique([tenantId, cuit])
+  @@index([tenantId])
+  @@map("razones_sociales")
+}
+
+enum MedioPago {
+  EFECTIVO
+  TARJETA_DEBITO
+  TARJETA_CREDITO
+  TRANSFERENCIA
+  QR
+  CUENTA_CORRIENTE
+  MERCADOPAGO
+  CUENTA_DNI
+  POSNET_BANCOS
+  POSNET_BILLETERAS
+  MODO
+  OTRO
+}
+
+enum TipoComprobante {
+  X // Comprobante interno sin validez fiscal
+  FC_A // Factura A (responsable inscripto → responsable inscripto)
+  FC_B // Factura B (responsable inscripto → consumidor final / monotributo)
+  FC_C // Factura C (monotributista)
+  FC_M // Factura M
+  NC_A // Nota de crédito A
+  NC_B // Nota de crédito B
+  NC_C // Nota de crédito C
+  ND_A // Nota de débito A
+  ND_B // Nota de débito B
+}
+
+enum EstadoTicket {
+  EMITIDO
+  ANULADO
+}
+
+model LineaTicket {
+  id         String    @id @default(cuid())
+  ticketId   String
+  ticket     Ticket    @relation(fields: [ticketId], references: [id], onDelete: Cascade)
+  productoId String?
+  producto   Producto? @relation(fields: [productoId], references: [id])
+
+  descripcion String
+  cantidad    Decimal @db.Decimal(15, 3)
+  precioUnit  Decimal @db.Decimal(15, 2)
+  impuesto    Decimal @default(21) @db.Decimal(5, 2)
+  subtotal    Decimal @db.Decimal(15, 2)
+
+  // Snapshot silencioso del costo vigente al momento de ESTA venta puntual — nunca se
+  // recalcula después. Sin esto, un reporte de ganancia solo podría mirar el precioCosto
+  // *actual* del producto, que ya está pisado por la próxima reposición, y daría mal la
+  // ganancia histórica de ventas viejas. null = línea vieja (de antes de este campo) o sin
+  // producto asociado (línea libre).
+  precioCosto Decimal? @db.Decimal(15, 2)
+
+  @@index([ticketId])
+  @@index([productoId])
+  @@map("lineas_ticket")
+}
+
+// Turno de caja del PoS: apertura con monto inicial, cierre con reconciliación por medio de pago
+model CajaSesion {
+  id       String @id @default(cuid())
+  tenantId String
+
+  sucursalId String
+  sucursal   Sucursal @relation(fields: [sucursalId], references: [id])
+  usuarioId  String
+  usuario    User     @relation(fields: [usuarioId], references: [id])
+
+  // Quién abrió/cerró FÍSICAMENTE la caja (por legajo) — puede ser distinto del usuarioId
+  // si varios empleados comparten el mismo login (admin/cajero) en la misma PC.
+  empleadoId String?
+  empleado   Empleado? @relation(fields: [empleadoId], references: [id])
+  comentario String? // el cajero/admin puede dejar una nota, nunca se editan los campos financieros
+
+  montoApertura        Decimal  @db.Decimal(15, 2)
+  montoCierreDeclarado Decimal? @db.Decimal(15, 2)
+  totalesPorMedioPago  Json? // snapshot al cerrar: {EFECTIVO: 1234.5, TARJETA_DEBITO: ...}
+  efectivoEsperado     Decimal? @db.Decimal(15, 2) // montoApertura + ventas/NC en efectivo del turno
+  diferencia           Decimal? @db.Decimal(15, 2) // montoCierreDeclarado - efectivoEsperado (+sobra / -falta)
+  motivoDiferencia     String? // obligatorio si |diferencia| supera el umbral configurado (kv caja.umbralDiferencia)
+  requiereRevision     Boolean  @default(false) // true si |diferencia| superó el umbral al cerrar, o si el cierre fue forzado
+  cierreForzado        Boolean  @default(false) // cerrada automáticamente por una corrección de fichaje, sin monto declarado real
+
+  estado    EstadoCaja @default(ABIERTA)
+  abiertaEn DateTime   @default(now())
+  cerradaEn DateTime?
+
+  tickets        Ticket[]
+  gastos         Gasto[]
+  ingresos       Ingreso[]
+  pagosProveedor PagoProveedor[]
+  pagosCliente   PagoCliente[]
+  ordenesCompra  OrdenCompra[]
+
+  @@index([tenantId])
+  @@index([tenantId, sucursalId, estado])
+  @@index([usuarioId])
+  @@index([empleadoId])
+  @@map("caja_sesiones")
+}
+
+// ═══════════════════════════════════════════════════════════
+//  BLOQUE — CONTABLE (Gastos, pagos a proveedores, cuentas internas)
+//  tenantId "bare" (sin relation formal a Tenant), mismo criterio ya usado en
+//  Cupon/ConfiguracionPuntos/Contacto — evita tocar el modelo Tenant central.
+// ═══════════════════════════════════════════════════════════
+enum FormaPagoInterno {
+  CAJA
+  FONDO
+  TRANSFERENCIA_DUENO
+}
+
+enum AreaNegocio {
+  PRODUCTO
+  SERVICIO
+  GENERAL
+}
+
+model Gasto {
+  id       String @id @default(cuid())
+  tenantId String
+
+  categoria   String
+  descripcion String?
+  monto       Decimal  @db.Decimal(15, 2)
+  fecha       DateTime @default(now())
+
+  // Snapshot de cotización — mismo criterio que OrdenCompra/Ticket: se completa solo al crear.
+  cotizacionTipo  String?
+  cotizacionValor Decimal? @db.Decimal(10, 2)
+  montoUSD        Decimal? @db.Decimal(15, 2)
+
+  formaPago    FormaPagoInterno
+  cajaSesionId String?
+  cajaSesion   CajaSesion?      @relation(fields: [cajaSesionId], references: [id])
+
+  usuarioId String
+  usuario   User   @relation(fields: [usuarioId], references: [id])
+
+  // Papelera + clasificación (feature Libro contable) — ver [[project_nexoerp_papelera_v261_20260810]]
+  activo               Boolean             @default(true)
+  area                 AreaNegocio         @default(GENERAL)
+  sucursalId           String?
+  sucursal             Sucursal?           @relation(fields: [sucursalId], references: [id])
+  empleadoId           String?
+  empleado             Empleado?           @relation(fields: [empleadoId], references: [id])
+  servicioContratadoId String?
+  servicioContratado   ServicioContratado? @relation(fields: [servicioContratadoId], references: [id])
+
+  creadoEn DateTime @default(now())
+
+  @@index([tenantId])
+  @@index([tenantId, fecha])
+  @@map("gastos")
+}
+
+// Catálogo liviano de servicios contratados recurrentes (créditos IA, servidor/hosting,
+// etc.) — asociación opcional en Gasto para saber "qué servicio se pagó" en el libro
+// contable de servicios. Mismo patrón simple que Sucursal/ListaPrecio (sin migración
+// de datos históricos, activo=false = papelera).
+model ServicioContratado {
+  id       String @id @default(cuid())
+  tenantId String
+
+  nombre   String
+  activo   Boolean  @default(true)
+  creadoEn DateTime @default(now())
+
+  gastos Gasto[]
+
+  @@index([tenantId])
+  @@map("servicios_contratados")
+}
+
+// Ingresos manuales (Feature 3b, 2026-08-10) — espejo exacto de Gasto pero para el lado
+// "Haber": ingresos que no vienen de una venta (Ticket) ni de un cobro de plan
+// (PagoPlanCliente) — ej. un reintegro, un ingreso vario. Se suma junto a esos dos en el
+// libro contable.
+model Ingreso {
+  id       String @id @default(cuid())
+  tenantId String
+
+  categoria   String
+  descripcion String?
+  monto       Decimal  @db.Decimal(15, 2)
+  fecha       DateTime @default(now())
+
+  // Snapshot de cotización — mismo criterio que OrdenCompra/Ticket: se completa solo al crear.
+  cotizacionTipo  String?
+  cotizacionValor Decimal? @db.Decimal(10, 2)
+  montoUSD        Decimal? @db.Decimal(15, 2)
+
+  formaPago    FormaPagoInterno
+  cajaSesionId String?
+  cajaSesion   CajaSesion?      @relation(fields: [cajaSesionId], references: [id])
+
+  usuarioId String
+  usuario   User   @relation(fields: [usuarioId], references: [id])
+
+  activo     Boolean     @default(true)
+  area       AreaNegocio @default(GENERAL)
+  sucursalId String?
+  sucursal   Sucursal?   @relation(fields: [sucursalId], references: [id])
+  clienteId  String?
+  cliente    Cliente?    @relation(fields: [clienteId], references: [id])
+
+  creadoEn DateTime @default(now())
+
+  @@index([tenantId])
+  @@index([tenantId, fecha])
+  @@map("ingresos")
+}
+
+model PagoProveedor {
+  id       String @id @default(cuid())
+  tenantId String
+
+  proveedorId String
+  proveedor   Proveedor @relation(fields: [proveedorId], references: [id])
+  monto       Decimal   @db.Decimal(15, 2)
+  fecha       DateTime  @default(now())
+  comentario  String?
+
+  // Snapshot de cotización — mismo criterio que OrdenCompra/Ticket: se completa solo al crear.
+  cotizacionTipo  String?
+  cotizacionValor Decimal? @db.Decimal(10, 2)
+  montoUSD        Decimal? @db.Decimal(15, 2)
+
+  formaPago    FormaPagoInterno
+  cajaSesionId String?
+  cajaSesion   CajaSesion?      @relation(fields: [cajaSesionId], references: [id])
+
+  usuarioId String
+  usuario   User   @relation(fields: [usuarioId], references: [id])
+
+  creadoEn DateTime @default(now())
+
+  @@index([tenantId])
+  @@index([tenantId, proveedorId])
+  @@map("pagos_proveedor")
+}
+
+// Cobro de cuenta corriente a un cliente — espejo exacto de PagoProveedor pero para el lado
+// "nos pagan a nosotros". Sube Cliente.saldo (negativo=debe, así que sumar el monto acerca a 0
+// y, si el pago excede la deuda, queda en positivo = saldo a favor del cliente).
+model PagoCliente {
+  id       String @id @default(cuid())
+  tenantId String
+
+  clienteId String
+  cliente   Cliente  @relation(fields: [clienteId], references: [id])
+  monto     Decimal  @db.Decimal(15, 2)
+  fecha     DateTime @default(now())
+  comentario String?
+
+  // Snapshot de cotización — mismo criterio que OrdenCompra/Ticket: se completa solo al crear.
+  cotizacionTipo  String?
+  cotizacionValor Decimal? @db.Decimal(10, 2)
+  montoUSD        Decimal? @db.Decimal(15, 2)
+
+  formaPago    FormaPagoInterno
+  cajaSesionId String?
+  cajaSesion   CajaSesion?      @relation(fields: [cajaSesionId], references: [id])
+
+  usuarioId String
+  usuario   User   @relation(fields: [usuarioId], references: [id])
+
+  creadoEn DateTime @default(now())
+
+  @@index([tenantId])
+  @@index([tenantId, clienteId])
+  @@map("pagos_cliente")
+}
+
+// Plan por cliente (punto 3, mejora 2026-08-06) — agenda de vencimientos para negocios con
+// financiación por cuota o planes mensuales (ej. agencias). Distinto del saldo cta-cte (que es un
+// balance corrido sin fecha): acá cada plan tiene un próximo vencimiento concreto y un estado
+// derivado de esa fecha (no se guarda, se calcula al leer — mismo criterio que CuentaInterna.saldo
+// no se guarda como campo, para que nunca se desincronice).
+enum Moneda {
+  ARS
+  USD
+}
+
+// Catálogo reutilizable de planes (Feature 2, 2026-08-10) — al asignarle un plan a un
+// cliente se puede elegir uno de acá para no re-tipear; los valores solo PRECARGAN el
+// formulario de PlanCliente, siguen editables y no quedan atados (si la plantilla cambia
+// después, los planes ya asignados no se mueven solos).
+model PlanTemplate {
+  id             String   @id @default(cuid())
+  tenantId       String
+  nombre         String
+  precio         Decimal  @db.Decimal(15, 2)
+  moneda         Moneda   @default(ARS)
+  frecuenciaDias Int      @default(30)
+  activo         Boolean  @default(true)
+  creadoEn       DateTime @default(now())
+
+  @@index([tenantId])
+  @@map("plan_templates")
+}
+
+// Catálogo propio de medios de pago para Planes/servicios — separado a propósito del de
+// Caja/PoS (son conceptualmente distintos). Semilla automática de 6 valores default la
+// primera vez que se pide vacío (mismo patrón que asegurarListaDefault).
+model MedioPagoServicio {
+  id       String   @id @default(cuid())
+  tenantId String
+  nombre   String
+  activo   Boolean  @default(true)
+  creadoEn DateTime @default(now())
+
+  pagos PagoPlanCliente[]
+
+  @@index([tenantId])
+  @@map("medios_pago_servicio")
+}
+
+// Cotización del dólar por tenant (Feature 2) — una fila por tenant, auto-fetch desde
+// dolarapi.com o edición manual (fuente indica cuál fue el último origen del valor).
+model CotizacionDolar {
+  id            String   @id @default(cuid())
+  tenantId      String   @unique
+  tenant        Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  oficialCompra Decimal  @default(0) @db.Decimal(10, 2)
+  oficialVenta  Decimal  @default(0) @db.Decimal(10, 2)
+  blueCompra    Decimal  @default(0) @db.Decimal(10, 2)
+  blueVenta     Decimal  @default(0) @db.Decimal(10, 2)
+  usdtCompra    Decimal  @default(0) @db.Decimal(10, 2)
+  usdtVenta     Decimal  @default(0) @db.Decimal(10, 2)
+  // NUEVO — 8va/7ma cotización: el usuario la tipea a mano cuando ninguna de las 6 de arriba
+  // coincide con lo que efectivamente le cobraron/pagaron ese día.
+  manualCompra  Decimal  @default(0) @db.Decimal(10, 2)
+  manualVenta   Decimal  @default(0) @db.Decimal(10, 2)
+  // Cuál de las 8 claves de arriba (ej. "oficialVenta", "manualCompra") es el default del
+  // tenant — la que se usa para el snapshot silencioso de cada transacción nueva.
+  tipoDefault   String   @default("oficialVenta")
+  fuente        String   @default("MANUAL") // 'API' | 'MANUAL'
+  actualizadoEn DateTime @updatedAt
+
+  @@map("cotizaciones_dolar")
+}
+
+// Histórico GLOBAL (sin tenantId) de cotizaciones capturadas por el cron automático — el
+// mercado tiene un solo oficial/blue/usdt real, no uno por tenant, así que una sola tabla
+// compartida evita duplicar la misma fila 1x por tenant en cada corrida. Se llena 4x/día
+// (10/12/14/17 hs ART) vía POST /cotizacion-dolar/cron-actualizar (cron-job.org externo,
+// protegido con el mismo SA_TOKEN que ya usa /superadmin — evita agregar una env var nueva,
+// que en este hosting exige un redeploy completo para tomar efecto). El backfill de
+// transacciones viejas (Parte D) consulta ACÁ primero antes de pegarle a argentinadatos.com,
+// así con el tiempo cada vez hace falta menos llamadas externas.
+model CotizacionDolarHistorial {
+  id            String   @id @default(cuid())
+  capturadoEn   DateTime @default(now())
+  oficialCompra Decimal  @db.Decimal(10, 2)
+  oficialVenta  Decimal  @db.Decimal(10, 2)
+  blueCompra    Decimal  @db.Decimal(10, 2)
+  blueVenta     Decimal  @db.Decimal(10, 2)
+  usdtCompra    Decimal  @db.Decimal(10, 2)
+  usdtVenta     Decimal  @db.Decimal(10, 2)
+
+  @@index([capturadoEn])
+  @@map("cotizaciones_dolar_historial")
+}
+
+model PlanCliente {
+  id       String @id @default(cuid())
+  tenantId String
+
+  clienteId String
+  cliente   Cliente @relation(fields: [clienteId], references: [id], onDelete: Cascade)
+
+  nombre             String
+  precio             Decimal  @db.Decimal(15, 2)
+  moneda             Moneda   @default(ARS) // NUEVO — Feature 2
+  frecuenciaDias     Int      @default(30)
+  proximoVencimiento DateTime
+  activo             Boolean  @default(true) // false = plan pausado, no se evalúa vencimiento
+  diasGracia         Int      @default(0) // NUEVO — días después del vencimiento antes de pasar a VENCIDO
+  templateId         String? // NUEVO — de qué plantilla se originó (solo informativo, no ata precio)
+
+  creadoEn DateTime @default(now())
+  actuEn   DateTime @updatedAt
+
+  pagos PagoPlanCliente[]
+
+  @@index([tenantId])
+  @@index([tenantId, clienteId])
+  @@map("planes_cliente")
+}
+
+model PagoPlanCliente {
+  id     String      @id @default(cuid())
+  planId String
+  plan   PlanCliente @relation(fields: [planId], references: [id], onDelete: Cascade)
+  monto  Decimal     @db.Decimal(15, 2)
+  fecha  DateTime    @default(now())
+
+  usuarioId String
+  usuario   User   @relation(fields: [usuarioId], references: [id])
+
+  // Opcional — permite filtrar el lado "ingresos servicio" del libro contable por
+  // sucursal igual que el lado "egresos" (Gasto.sucursalId).
+  sucursalId String?
+  sucursal   Sucursal? @relation(fields: [sucursalId], references: [id])
+
+  // NUEVO — Feature 2 (2026-08-10): conversión, medio de pago propio de Planes, a
+  // cuántos períodos corresponde este pago (base del rediseño de adelantado/atrasado/
+  // gracia — ver planEstado() en clientes.js) y comprobante adjunto.
+  cotizacionAplicada Decimal?           @db.Decimal(10, 2) // solo si el plan era USD
+  // NUEVO: qué tipo de cotización era el default del tenant en ese momento (ej. "oficialVenta")
+  // y a cuántos USD equivalió el pago — cotizacionAplicada queda igual que antes (el valor que
+  // manda el form cuando el plan es USD), esto es el snapshot silencioso adicional.
+  cotizacionTipo     String?
+  montoUSD           Decimal?           @db.Decimal(15, 2)
+  medioPagoId        String?
+  medioPago          MedioPagoServicio? @relation(fields: [medioPagoId], references: [id])
+  periodosCubiertos  Int                @default(1)
+  periodoDesde       DateTime?
+  periodoHasta       DateTime?
+  comprobantePdf     String?            @db.Text // data URI application/pdf, solo Clientes/Adm.Clientes
+
+  creadoEn DateTime @default(now())
+
+  @@index([planId])
+  @@map("pagos_plan_cliente")
+}
+
+enum TipoCuentaInterna {
+  FONDO
+  TRANSFERENCIA_DUENO
+}
+
+// Fondo y Transferencia Dueño son la misma estructura (una cuenta con saldo, que sube y baja por
+// movimientos) — una sola fila por tenant por tipo, autocurativa (ver cuentaInternaAsegurar en el
+// backend), en vez de 2 modelos casi idénticos.
+model CuentaInterna {
+  id       String            @id @default(cuid())
+  tenantId String
+  tipo     TipoCuentaInterna
+
+  movimientos MovimientoCuentaInterna[]
+
+  @@unique([tenantId, tipo])
+  @@map("cuentas_internas")
+}
+
+model MovimientoCuentaInterna {
+  id       String        @id @default(cuid())
+  cuentaId String
+  cuenta   CuentaInterna @relation(fields: [cuentaId], references: [id], onDelete: Cascade)
+
+  tipo     String // INGRESO | EGRESO
+  monto    Decimal @db.Decimal(15, 2)
+  concepto String // ej. "Gasto: Alquiler", "Pago a proveedor: Distribuidora X", "Carga manual"
+
+  usuarioId String
+  usuario   User   @relation(fields: [usuarioId], references: [id])
+
+  fecha DateTime @default(now())
+
+  @@index([cuentaId])
+  @@index([cuentaId, fecha])
+  @@map("movimientos_cuenta_interna")
+}
+
+enum EstadoCaja {
+  ABIERTA
+  CERRADA
+}
+
+// ═══════════════════════════════════════════════════════════
+//  BLOQUE 12 — FICHAJE (control de asistencia por legajo)
+// ═══════════════════════════════════════════════════════════
+
+// Persona física que trabaja en el local — independiente del login (User).
+// Varios empleados pueden compartir un mismo login (admin/cajero) en la misma PC;
+// el legajo es lo que identifica quién hizo qué (fichaje, apertura/cierre de caja).
+model Empleado {
+  id       String @id @default(cuid())
+  tenantId String
+  tenant   Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  legajo   String // ej. "BA391451454" (letras del local + DNI)
+  nombre   String
+  pin      String? // hash bcrypt, opcional — si está seteado, se exige junto al legajo
+  userId   String?  @unique // opcional: vínculo a un login real, si lo tiene
+  user     User?    @relation(fields: [userId], references: [id])
+  activo   Boolean  @default(true)
+  creadoEn DateTime @default(now())
+
+  fichajes     Fichaje[]
+  cajaSesiones CajaSesion[]
+  gastos       Gasto[]
+
+  @@unique([tenantId, legajo])
+  @@index([tenantId])
+  @@map("empleados")
+}
+
+enum TipoFichaje {
+  INGRESO
+  DESCANSO
+  REGRESO
+  SALIDA
+}
+
+// Log inmutable de fichadas — nunca se edita ni borra, sólo se agregan eventos
+model Fichaje {
+  id         String   @id @default(cuid())
+  tenantId   String
+  empleadoId String
+  empleado   Empleado @relation(fields: [empleadoId], references: [id])
+  sucursalId String?
+
+  tipo  TipoFichaje
+  fecha DateTime    @default(now())
+
+  // Corrección admin: un fichaje mal marcado nunca se edita/borra (log append-only) —
+  // en cambio, un admin agrega un fichaje nuevo que corrige al anterior, con motivo obligatorio.
+  corrigeId    String?
+  corrige      Fichaje?  @relation("FichajeCorreccion", fields: [corrigeId], references: [id])
+  correcciones Fichaje[] @relation("FichajeCorreccion")
+  motivo       String?
+
+  @@index([tenantId])
+  @@index([empleadoId, fecha])
+  @@map("fichajes")
+}
+
+// ═══════════════════════════════════════════════════════════
+//  BLOQUE 7 — INVENTARIO: MOVIMIENTOS (log inmutable)
+// ═══════════════════════════════════════════════════════════
+
+// Tabla append-only: NUNCA se actualiza ni borra un registro.
+// Es el libro mayor del inventario. Todo cambio de stock = un movimiento.
+
+model MovimientoStock {
+  id       String @id @default(cuid())
+  tenantId String
+  tenant   Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  productoId String
+  producto   Producto @relation(fields: [productoId], references: [id])
+  usuarioId  String
+  usuario    User     @relation(fields: [usuarioId], references: [id])
+
+  tipo     TipoMovimiento
+  cantidad Decimal        @db.Decimal(15, 3) // positivo = entrada, negativo = salida
+
+  // Stock resultante después de este movimiento (snapshot para auditoría)
+  stockPost Decimal @db.Decimal(15, 3)
+
+  // Origen del movimiento (uno de estos tendrá valor, el resto null)
+  ordenVentaId   String?
+  ordenCompraId  String?
+  ticketId       String?
+  ordenTrabajoId String?
+
+  referencia String? // texto libre ej. "Ajuste inventario físico"
+  loteId     String?
+  sucursalId String?
+
+  fecha DateTime @default(now())
+
+  @@index([tenantId])
+  @@index([productoId])
+  @@index([tenantId, fecha]) // para reportes por período
+  @@map("movimientos_stock")
+}
+
+enum TipoMovimiento {
+  ENTRADA_COMPRA
+  ENTRADA_PRODUCCION
+  ENTRADA_DEVOLUCION
+  ENTRADA_AJUSTE
+  ENTRADA_INICIAL
+  SALIDA_VENTA
+  SALIDA_PRODUCCION
+  SALIDA_AJUSTE
+  SALIDA_MERMA
+  TRANSFERENCIA_ENTRADA
+  TRANSFERENCIA_SALIDA
+}
+
+// ═══════════════════════════════════════════════════════════
+//  BLOQUE 8 — PRODUCCIÓN (MRP básico)
+// ═══════════════════════════════════════════════════════════
+
+// Fórmula / Bill of Materials — qué ingredientes/componentes
+// se necesitan para fabricar una unidad de un producto.
+model BOM {
+  id         String   @id @default(cuid())
+  tenantId   String
+  productoId String // producto que se fabrica
+  nombre     String? // nombre de la fórmula
+  version    String   @default("1")
+  activa     Boolean  @default(true)
+  creadoEn   DateTime @default(now())
+  actuEn     DateTime @updatedAt
+
+  items          BOMItem[]
+  ordenesTrabajo OrdenTrabajo[]
+
+  @@unique([tenantId, productoId, version])
+  @@index([tenantId])
+  @@map("boms")
+}
+
+model BOMItem {
+  id       String  @id @default(cuid())
+  bomId    String
+  bom      BOM     @relation(fields: [bomId], references: [id], onDelete: Cascade)
+  insumoId String // producto usado como insumo
+  cantidad Decimal @db.Decimal(15, 4)
+  um       String  @default("unidad")
+  merma    Decimal @default(0) @db.Decimal(5, 2) // % de merma estimada
+
+  @@index([bomId])
+  @@map("bom_items")
+}
+
+model OrdenTrabajo {
+  id       String @id @default(cuid())
+  tenantId String
+  nro      Int
+  bomId    String
+  bom      BOM    @relation(fields: [bomId], references: [id])
+
+  cantPlanif Decimal @db.Decimal(15, 3)
+  cantProd   Decimal @default(0) @db.Decimal(15, 3)
+
+  fechaInicio DateTime?
+  fechaFin    DateTime?
+  fechaFinEst DateTime?
+
+  estado        EstadoOT @default(PLANIFICADA)
+  observaciones String?
+
+  creadoEn DateTime @default(now())
+  actuEn   DateTime @updatedAt
+
+  lineas LineaOrdenTrabajo[]
+
+  @@unique([tenantId, nro])
+  @@index([tenantId])
+  @@map("ordenes_trabajo")
+}
+
+enum EstadoOT {
+  PLANIFICADA
+  EN_PROCESO
+  PAUSADA
+  COMPLETADA
+  CANCELADA
+}
+
+model LineaOrdenTrabajo {
+  id         String       @id @default(cuid())
+  ordenId    String
+  orden      OrdenTrabajo @relation(fields: [ordenId], references: [id], onDelete: Cascade)
+  productoId String
+  producto   Producto     @relation(fields: [productoId], references: [id])
+
+  cantPlanif    Decimal @db.Decimal(15, 3)
+  cantConsumida Decimal @default(0) @db.Decimal(15, 3)
+
+  @@index([ordenId])
+  @@map("lineas_orden_trabajo")
+}
+
+// ═══════════════════════════════════════════════════════════
+//  BLOQUE 9 — LOGÍSTICA
+// ═══════════════════════════════════════════════════════════
+
+model Repartidor {
+  id       String   @id @default(cuid())
+  tenantId String
+  nombre   String
+  tel      String?
+  vehiculo String?
+  patente  String?
+  activo   Boolean  @default(true)
+  creadoEn DateTime @default(now())
+
+  rutas Ruta[]
+
+  @@index([tenantId])
+  @@map("repartidores")
+}
+
+model Ruta {
+  id           String     @id @default(cuid())
+  tenantId     String
+  nro          Int
+  repartidorId String
+  repartidor   Repartidor @relation(fields: [repartidorId], references: [id])
+
+  fecha         DateTime   @default(now())
+  estado        EstadoRuta @default(PLANIFICADA)
+  observaciones String?
+
+  creadoEn DateTime @default(now())
+  actuEn   DateTime @updatedAt
+
+  entregas Entrega[]
+
+  @@unique([tenantId, nro])
+  @@index([tenantId])
+  @@map("rutas")
+}
+
+enum EstadoRuta {
+  PLANIFICADA
+  EN_CURSO
+  COMPLETADA
+  CANCELADA
+}
+
+model Entrega {
+  id           String  @id @default(cuid())
+  tenantId     String
+  rutaId       String?
+  ruta         Ruta?   @relation(fields: [rutaId], references: [id])
+  ordenVentaId String?
+
+  direccion     String
+  clienteNombre String
+  clienteTel    String?
+
+  orden  Int           @default(0) // orden dentro de la ruta
+  estado EstadoEntrega @default(PENDIENTE)
+
+  // Confirmación
+  firmadoPor    String?
+  fotoUrl       String?
+  fechaEntrega  DateTime?
+  observaciones String?
+
+  creadoEn DateTime @default(now())
+  actuEn   DateTime @updatedAt
+
+  @@index([tenantId])
+  @@index([rutaId])
+  @@map("entregas")
+}
+
+enum EstadoEntrega {
+  PENDIENTE
+  EN_CAMINO
+  ENTREGADA
+  FALLIDA
+  REPROGRAMADA
+}
+
+// ═══════════════════════════════════════════════════════════
+//  BLOQUE 10 — E-COMMERCE (integraciones externas)
+// ═══════════════════════════════════════════════════════════
+
+model Integracion {
+  id       String @id @default(cuid())
+  tenantId String
+  tenant   Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  plataforma PlataformaEcom
+  nombre     String? // label del usuario ej. "Mi tienda Shopify"
+  activa     Boolean        @default(true)
+
+  // Credenciales (encriptadas en la aplicación antes de guardar)
+  accessToken   String?
+  refreshToken  String?
+  shopUrl       String? // ej. "mitienda.myshopify.com"
+  webhookSecret String?
+
+  // Configuración sync
+  syncStock   Boolean   @default(true)
+  syncPrecios Boolean   @default(true)
+  freqSync    Int       @default(5) // minutos entre sync
+  ultimoSync  DateTime?
+  syncStatus  String? // "ok", "error", mensaje
+
+  creadoEn DateTime @default(now())
+  actuEn   DateTime @updatedAt
+
+  pedidos PedidoExterno[]
+
+  @@unique([tenantId, plataforma])
+  @@index([tenantId])
+  @@map("integraciones")
+}
+
+enum PlataformaEcom {
+  TIENDANUBE
+  SHOPIFY
+  WOOCOMMERCE
+  MERCADOLIBRE
+  MERCADOPAGO
+  STRIPE
+  WHATSAPP_BUSINESS
+}
+
+model PedidoExterno {
+  id            String      @id @default(cuid())
+  tenantId      String
+  integracionId String
+  integracion   Integracion @relation(fields: [integracionId], references: [id])
+
+  idExterno  String // ID en la plataforma origen
+  plataforma PlataformaEcom
+  nroExterno String? // número de orden visible al cliente
+
+  clienteNombre    String
+  clienteEmail     String?
+  clienteTel       String?
+  clienteDireccion String?
+
+  total  Decimal         @db.Decimal(15, 2)
+  estado EstadoPedidoExt @default(NUEVO)
+
+  // Si ya se procesó como OV interna
+  ordenVentaId String?
+
+  rawData Json? // payload original de la plataforma
+
+  creadoEn DateTime @default(now())
+  actuEn   DateTime @updatedAt
+
+  @@unique([tenantId, idExterno, plataforma])
+  @@index([tenantId])
+  @@index([tenantId, estado])
+  @@map("pedidos_externos")
+}
+
+enum EstadoPedidoExt {
+  NUEVO
+  PROCESADO // ya tiene OV interna
+  SIN_STOCK
+  ERROR
+  CANCELADO
+}
+
+// ═══════════════════════════════════════════════════════════
+//  BLOQUE 11 — CONFIGURACIÓN & AUDITORÍA
+// ═══════════════════════════════════════════════════════════
+
+// Pares clave-valor por tenant para configuraciones dinámicas
+// sin necesidad de agregar columnas al schema
+model ConfiguracionEmpresa {
+  id       String @id @default(cuid())
+  tenantId String
+  tenant   Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  clave  String // ej. "facturacion.ptoVta", "email.from"
+  valor  String
+  actuEn DateTime @updatedAt
+
+  @@unique([tenantId, clave])
+  @@map("configuraciones_empresa")
+}
+
+// Log inmutable de todas las acciones sensibles del sistema
+// Para auditoría, compliance y debugging
+model AuditLog {
+  id       String  @id @default(cuid())
+  tenantId String
+  userId   String?
+  user     User?   @relation(fields: [userId], references: [id])
+
+  accion    String // ej. "ticket.emitir_factura", "user.create"
+  entidad   String? // ej. "Ticket"
+  entidadId String?
+  detalle   Json? // snapshot del cambio {antes, despues}
+  ip        String?
+  userAgent String?
+
+  createdAt DateTime @default(now())
+
+  @@index([tenantId])
+  @@index([tenantId, accion])
+  @@index([tenantId, entidad, entidadId])
+  @@index([userId])
+  @@map("audit_logs")
+}
+
+// ═══════════════════════════════════════════════════════════
+//  CRM — Contactos, Etiquetas, Tareas/Agenda (bajo el módulo "Clientes")
+//  Fase 1 del CRM (Embudo y Mensajes quedan para más adelante). tenantId "bare" (sin relation
+//  formal a Tenant), mismo criterio ya usado en Cupon/ConfiguracionPuntos — evita tocar el
+//  modelo Tenant para cada entidad nueva. clienteId/contactoId/usuarioId también son bare por
+//  el mismo motivo (siguiendo el precedente de Ticket.cuponId).
+// ═══════════════════════════════════════════════════════════
+
+model Contacto {
+  id            String      @id @default(cuid())
+  tenantId      String
+  nombre        String
+  empresa       String?
+  cargo         String?
+  email         String?
+  tel           String?
+  whatsapp      String? // separado de tel, mismo criterio que Cliente.whatsapp
+  notas         String?
+  clienteId     String? // opcional: si el contacto ya es un Cliente dado de alta
+  etapa         EtapaEmbudo @default(NUEVO) // legacy — el Kanban de Embudo ahora lee/escribe etapaCustomId
+  valorEstimado Decimal?    @db.Decimal(15, 2)
+  camposCustom  Json? // {clave: valor} según CampoCustomContacto del tenant
+  sucursalId    String? // filtro de Embudo, sin relación formal (mismo criterio "bare" que otros módulos)
+  usuarioId     String? // vendedor asignado, filtro de Embudo
+  tipoEmbudoId  String? // pipeline en el que vive este contacto
+  etapaCustomId String? // etapa dentro de ese pipeline (fuente de verdad del Kanban)
+  activo        Boolean     @default(true)
+  creadoEn      DateTime    @default(now())
+  actuEn        DateTime    @updatedAt
+
+  etiquetas   EtiquetaContacto[]
+  notasLog    NotaContacto[]
+  tipoEmbudo  TipoEmbudo?        @relation(fields: [tipoEmbudoId], references: [id])
+  etapaCustom EtapaEmbudoCustom? @relation(fields: [etapaCustomId], references: [id])
+
+  @@index([tenantId])
+  @@index([tenantId, etapa])
+  @@index([tenantId, etapaCustomId])
+  @@map("crm_contactos")
+}
+
+// ── Embudo custom por tenant (Fase 3 del CRM, 2026-08-08) — reemplaza el enum fijo EtapaEmbudo
+// como fuente de verdad del Kanban. El enum/campo `etapa` arriba se deja intacto (lo sigue
+// leyendo el Dashboard) pero deja de ser lo que mueve el Kanban.
+model TipoEmbudo {
+  id        String   @id @default(cuid())
+  tenantId  String
+  nombre    String
+  esDefault Boolean  @default(false)
+  creadoEn  DateTime @default(now())
+
+  etapas    EtapaEmbudoCustom[]
+  contactos Contacto[]
+
+  @@index([tenantId])
+  @@map("crm_tipos_embudo")
+}
+
+model EtapaEmbudoCustom {
+  id           String     @id @default(cuid())
+  tenantId     String
+  tipoEmbudoId String
+  tipoEmbudo   TipoEmbudo @relation(fields: [tipoEmbudoId], references: [id], onDelete: Cascade)
+  nombre       String
+  color        String     @default("#6c5ce7")
+  orden        Int        @default(0)
+  creadoEn     DateTime   @default(now())
+
+  contactos Contacto[]
+
+  @@index([tenantId, tipoEmbudoId])
+  @@map("crm_etapas_embudo_custom")
+}
+
+enum EtapaEmbudo {
+  NUEVO
+  CONTACTADO
+  PROPUESTA
+  NEGOCIACION
+  GANADO
+  PERDIDO
+}
+
+model NotaContacto {
+  id         String   @id @default(cuid())
+  tenantId   String
+  contactoId String
+  contacto   Contacto @relation(fields: [contactoId], references: [id], onDelete: Cascade)
+  texto      String
+  usuarioId  String?
+  creadoEn   DateTime @default(now())
+
+  @@index([tenantId, contactoId])
+  @@map("crm_notas_contacto")
+}
+
+enum CampoCustomTipo {
+  TEXTO
+  NUMERO
+  FECHA
+  SELECT
+}
+
+model CampoCustomContacto {
+  id              String          @id @default(cuid())
+  tenantId        String
+  clave           String // identificador estable, ej. "canal_origen"
+  label           String // etiqueta visible, ej. "Canal de origen"
+  tipo            CampoCustomTipo @default(TEXTO)
+  opciones        String? // CSV de opciones si tipo=SELECT
+  orden           Int             @default(0)
+  mostrarEnEmbudo Boolean         @default(false) // si aparece en las cards del Kanban de Embudo
+  creadoEn        DateTime        @default(now())
+
+  @@unique([tenantId, clave])
+  @@index([tenantId])
+  @@map("crm_campos_custom_contacto")
+}
+
+model Etiqueta {
+  id       String   @id @default(cuid())
+  tenantId String
+  nombre   String
+  color    String?
+  creadoEn DateTime @default(now())
+
+  contactos EtiquetaContacto[]
+
+  @@unique([tenantId, nombre])
+  @@map("crm_etiquetas")
+}
+
+model EtiquetaContacto {
+  id         String   @id @default(cuid())
+  contactoId String
+  contacto   Contacto @relation(fields: [contactoId], references: [id], onDelete: Cascade)
+  etiquetaId String
+  etiqueta   Etiqueta @relation(fields: [etiquetaId], references: [id], onDelete: Cascade)
+
+  @@unique([contactoId, etiquetaId])
+  @@map("crm_contacto_etiquetas")
+}
+
+enum EstadoTareaCRM {
+  PENDIENTE
+  HECHA
+}
+
+enum PrioridadTarea {
+  BAJA
+  MEDIA
+  ALTA
+}
+
+enum TipoTarea {
+  LLAMADA
+  REUNION
+  EMAIL
+  SEGUIMIENTO
+  GENERAL
+}
+
+model Tarea {
+  id               String         @id @default(cuid())
+  tenantId         String
+  titulo           String
+  descripcion      String?
+  fechaInicio      DateTime? // rango para el Gantt; null = barra de 1 día en fechaVencimiento
+  fechaVencimiento DateTime?
+  prioridad        PrioridadTarea @default(MEDIA)
+  tipo             TipoTarea      @default(GENERAL)
+  estado           EstadoTareaCRM @default(PENDIENTE)
+  contactoId       String?
+  usuarioId        String?
+  creadoEn         DateTime       @default(now())
+  actuEn           DateTime       @updatedAt
+
+  @@index([tenantId])
+  @@map("crm_tareas")
+}
+
+// ── Módulo Taller (V2.102.0, 2026-10-15) — órdenes de armado / reparación / garantía.
+// Un equipo que entra al taller: datos del equipo, del cliente, qué deja y qué se lleva, y su
+// avance por un pipeline fijo (ver ESTADOS_TALLER en src/routes/v1/taller.js). clienteId/
+// sucursalId/tecnicoId "bare", sin relación formal — mismo criterio que crm_contactos. Los datos
+// de contacto del cliente se copian a la orden (snapshot) para que el comprobante no cambie si
+// después se edita la ficha del cliente.
+model OrdenTaller {
+  id       String @id @default(cuid())
+  tenantId String
+  numero   Int // correlativo por tenant (Tenant.seqTaller) — es el "nº de ticket" de la etiqueta
+  tipo     String // ARMADO | REPARACION | GARANTIA
+  estado   String @default("INGRESADO")
+
+  clienteId       String?
+  clienteNombre   String
+  clienteTel      String?
+  clienteEmail    String?
+  clienteDni      String?
+
+  equipoTipo   String? // Celular, Notebook, PC...
+  marca        String?
+  modelo       String?
+  nroSerie     String? // serie / IMEI / código de barras escaneado
+  productoId   String? // si el código escaneado coincide con un producto del inventario
+  falla        String? // lo que pide/reporta el cliente (en Armado: qué hay que armar)
+  estadoFisico String? // cómo llega: golpes, rayones, pantalla rota...
+  accesorios   Json? // [{ nombre, deja: true|false }] — deja en el taller / se lleva el cliente
+  claveAcceso  String? // PIN / patrón / contraseña — solo se ve dentro del sistema, nunca se imprime
+
+  // Garantía: de qué compra viene
+  comprobanteCompra String?
+  fechaCompra       DateTime?
+
+  fechaPrometida DateTime? // "tiempo de revisión" prometido al cliente
+  tecnicoId      String?
+  tecnicoNombre  String?
+  sucursalId     String?
+
+  presupuesto        Decimal?  @db.Decimal(15, 2)
+  presupuestoDetalle String?
+  presupuestoEn      DateTime?
+  aprobadoEn         DateTime?
+  informe            String? // informe técnico / trabajo realizado
+
+  sena        Decimal?  @db.Decimal(15, 2) // adelanto al ingresar
+  total       Decimal?  @db.Decimal(15, 2) // lo que se cobró al entregar (incluye la seña)
+  medioPago   String?
+  garantiaDias Int?
+  entregadoEn DateTime?
+
+  usuarioId String? // quién tomó el ingreso
+  activo    Boolean  @default(true)
+  creadoEn  DateTime @default(now())
+  actuEn    DateTime @updatedAt
+
+  eventos OrdenTallerEvento[]
+
+  @@unique([tenantId, numero])
+  @@index([tenantId, tipo, estado])
+  @@index([tenantId, clienteId])
+  @@map("ordenes_taller")
+}
+
+// Historial de la orden: cambios de estado, comentarios, presupuesto, informe, entrega.
+model OrdenTallerEvento {
+  id            String      @id @default(cuid())
+  tenantId      String
+  ordenId       String
+  orden         OrdenTaller @relation(fields: [ordenId], references: [id], onDelete: Cascade)
+  tipo          String // ESTADO | COMENTARIO | PRESUPUESTO | INFORME | ENTREGA
+  texto         String?
+  estado        String? // estado al que pasó (si tipo = ESTADO)
+  usuarioId     String?
+  usuarioNombre String?
+  creadoEn      DateTime    @default(now())
+
+  @@index([ordenId])
+  @@map("ordenes_taller_eventos")
+}

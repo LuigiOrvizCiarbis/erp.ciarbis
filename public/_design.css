@@ -1,0 +1,17 @@
+/* BIMS ERP — Design System compartido por todas las páginas */
+:root[data-theme="dark"]{
+  --bg:#07080F;--surface:#0D0F1A;--card:#141622;--card2:#1A1D2E;
+  --border:rgba(255,255,255,0.08);
+  --accent:#1E40FF;--accent2:#00D4AA;--red:#FF6B6B;--amber:#FFB347;
+  --text:#F0EFF8;--muted:#8B8FA8;--lgray:#C0C4D6;
+  --input-bg:rgba(255,255,255,0.05);--glow:rgba(30,64,255,0.14);
+  --shadow:0 8px 48px rgba(0,0,0,0.45);
+}
+:root[data-theme="light"]{
+  --bg:#F0F2FA;--surface:#fff;--card:#fff;--card2:#F4F6FB;
+  --border:rgba(0,0,0,0.09);
+  --accent:#1E40FF;--accent2:#0AA882;--red:#DC2626;--amber:#D97706;
+  --text:#0A0C1A;--muted:#5A6080;--lgray:#374151;
+  --input-bg:rgba(0,0,0,0.04);--glow:rgba(30,64,255,0.08);
+  --shadow:0 8px 48px rgba(0,0,0,0.12);
+}

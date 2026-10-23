@@ -1,0 +1,406 @@
+<!DOCTYPE html>
+<html lang="es" data-theme="dark">
+<head>
+<meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>BIMS ERP · Registrá tu empresa</title>
+<link rel="icon" type="image/png" href="/img/iso-erp-32.png">
+<link rel="apple-touch-icon" href="/img/apple-touch-icon.png">
+<link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+:root[data-theme="dark"]{--bg:#07080F;--surface:#0D0F1A;--card:#141622;--border:rgba(255,255,255,0.08);--accent:#1E40FF;--accent2:#00D4AA;--red:#FF6B6B;--text:#F0EFF8;--muted:#8B8FA8;--lgray:#C0C4D6;--input-bg:rgba(255,255,255,0.05);--glow:rgba(30,64,255,0.14);--shadow:0 8px 48px rgba(0,0,0,0.45)}
+:root[data-theme="light"]{--bg:#F0F2FA;--surface:#fff;--card:#fff;--border:rgba(0,0,0,0.09);--accent:#1E40FF;--accent2:#0AA882;--red:#DC2626;--text:#0A0C1A;--muted:#5A6080;--lgray:#374151;--input-bg:rgba(0,0,0,0.04);--glow:rgba(30,64,255,0.08);--shadow:0 8px 48px rgba(0,0,0,0.12)}
+*{box-sizing:border-box;margin:0;padding:0}
+body{font-family:'Plus Jakarta Sans',sans-serif;background:var(--bg);color:var(--text);min-height:100vh;transition:background .25s,color .25s}
+.header{position:fixed;top:0;left:0;right:0;z-index:100;height:60px;display:flex;align-items:center;justify-content:space-between;padding:0 2rem;background:var(--surface);border-bottom:1px solid var(--border);backdrop-filter:blur(20px)}
+.logo{display:flex;align-items:center;gap:10px;text-decoration:none}
+.logo-icon{width:34px;height:34px;display:flex;align-items:center;justify-content:center}
+.logo-icon img{width:100%;height:100%;object-fit:contain}
+.logo-text{font-size:16px;font-weight:800;color:var(--text)}.logo-text span{color:var(--accent)}
+.logo-tag{font-size:9px;color:var(--accent2);font-family:'JetBrains Mono',monospace;letter-spacing:.06em}
+.header-right{display:flex;align-items:center;gap:8px}
+.btn-theme{width:34px;height:34px;border-radius:9px;border:1px solid var(--border);background:transparent;color:var(--muted);cursor:pointer;font-size:15px;transition:all .15s;display:flex;align-items:center;justify-content:center}
+.btn-theme:hover{color:var(--text);border-color:var(--accent)}
+.btn-login{padding:7px 16px;font-size:13px;font-weight:600;border-radius:9px;border:1px solid var(--border);background:transparent;color:var(--muted);cursor:pointer;font-family:'Plus Jakarta Sans',sans-serif;transition:all .15s;text-decoration:none}
+.btn-login:hover{border-color:var(--accent);color:var(--accent)}
+
+.main{min-height:100vh;padding:80px 1.5rem 3rem;display:flex;align-items:flex-start;justify-content:center;padding-top:100px}
+.container{width:100%;max-width:560px}
+
+.hero{text-align:center;margin-bottom:2rem}
+.hero-badge{display:inline-flex;align-items:center;gap:6px;padding:4px 12px;border-radius:20px;background:rgba(30,64,255,.12);border:1px solid rgba(30,64,255,.25);color:var(--accent);font-size:11px;font-weight:600;font-family:'JetBrains Mono',monospace;letter-spacing:.05em;margin-bottom:.75rem}
+.hero h1{font-size:clamp(1.6rem,4vw,2.2rem);font-weight:800;letter-spacing:-.03em;line-height:1.15;margin-bottom:.5rem}
+.hero h1 span{background:linear-gradient(135deg,var(--accent),var(--accent2));-webkit-background-clip:text;-webkit-text-fill-color:transparent;background-clip:text}
+.hero p{color:var(--muted);font-size:14px;line-height:1.6}
+
+/* Progress */
+.progress-wrap{margin-bottom:1.5rem}
+.progress-labels{display:flex;justify-content:space-between;margin-bottom:.5rem}
+.plabel{font-size:11px;font-weight:500;color:var(--muted);transition:color .2s;cursor:default}
+.plabel.active{color:var(--accent);font-weight:700}
+.plabel.done{color:var(--accent2)}
+.pbar{height:3px;background:var(--border);border-radius:99px;overflow:hidden}
+.pfill{height:100%;border-radius:99px;background:linear-gradient(90deg,var(--accent),var(--accent2));transition:width .4s cubic-bezier(.4,0,.2,1)}
+
+/* Card */
+.form-card{background:var(--card);border:1px solid var(--border);border-radius:20px;padding:2rem;box-shadow:var(--shadow)}
+.step{display:none;animation:fadeUp .3s ease}
+.step.active{display:block}
+@keyframes fadeUp{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:none}}
+.step-num{font-size:10px;color:var(--muted);font-family:'JetBrains Mono',monospace;letter-spacing:.08em;text-transform:uppercase;margin-bottom:.3rem}
+.step-title{font-size:1.15rem;font-weight:800;letter-spacing:-.02em;margin-bottom:.25rem}
+.step-sub{color:var(--muted);font-size:13px;margin-bottom:1.5rem;line-height:1.5}
+
+/* Fields */
+.field{margin-bottom:1.1rem}
+.field-row{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+.flabel{display:block;font-size:12px;font-weight:600;color:var(--muted);margin-bottom:5px;letter-spacing:.02em}
+.finput{width:100%;background:var(--input-bg);border:1px solid var(--border);border-radius:10px;color:var(--text);font-family:'Plus Jakarta Sans',sans-serif;font-size:14px;padding:11px 13px;outline:none;transition:border-color .2s,box-shadow .2s}
+.finput:focus{border-color:var(--accent);box-shadow:0 0 0 3px var(--glow)}
+.finput.err{border-color:var(--red)}
+select.finput option{background:var(--card);color:var(--text)}
+.ferr{font-size:11px;color:var(--red);margin-top:4px;display:none}
+
+/* Industria grid */
+.opt-grid{display:grid;grid-template-columns:1fr 1fr;gap:8px}
+.opt-btn{padding:10px 12px;border:1px solid var(--border);border-radius:10px;background:var(--input-bg);color:var(--text);font-size:12.5px;font-weight:500;cursor:pointer;font-family:'Plus Jakarta Sans',sans-serif;text-align:left;transition:all .15s;display:flex;align-items:center;gap:8px}
+.opt-btn:hover{border-color:rgba(30,64,255,.4)}
+.opt-btn.selected{border-color:var(--accent);background:rgba(30,64,255,.12);color:var(--accent)}
+.opt-icon{font-size:18px;min-width:22px}
+
+/* Módulos sugeridos */
+.mod-grid{display:flex;flex-direction:column;gap:6px}
+.mod-item{display:flex;align-items:center;gap:10px;padding:9px 12px;border:1px solid var(--border);border-radius:10px;background:var(--input-bg);cursor:pointer;transition:all .15s}
+.mod-item:hover{border-color:rgba(30,64,255,.4)}
+.mod-item.checked{border-color:var(--accent);background:rgba(30,64,255,.1)}
+.mod-item.soon{opacity:.5;cursor:not-allowed}
+.mod-item input{accent-color:var(--accent);width:16px;height:16px}
+.mod-icon{font-size:16px}
+.mod-label{flex:1;font-size:13px;font-weight:500}
+.mod-soon-tag{font-size:10px;font-weight:700;color:var(--accent2);font-family:'JetBrains Mono',monospace;letter-spacing:.03em}
+
+/* Password */
+.pwd-wrap{position:relative}
+.pwd-toggle{position:absolute;right:12px;top:50%;transform:translateY(-50%);background:none;border:none;color:var(--muted);cursor:pointer;font-size:16px;padding:2px}
+.pwd-bar{height:3px;background:var(--border);border-radius:99px;overflow:hidden;margin-top:5px}
+.pwd-fill{height:100%;border-radius:99px;transition:all .3s;width:0}
+.pwd-hint{font-size:11px;color:var(--muted);margin-top:3px}
+
+/* Nav */
+.form-nav{display:flex;gap:10px;margin-top:1.5rem}
+.btn-back{padding:12px 20px;border:1px solid var(--border);border-radius:10px;background:transparent;color:var(--muted);font-size:14px;font-weight:600;cursor:pointer;font-family:'Plus Jakarta Sans',sans-serif;transition:all .2s}
+.btn-back:hover{color:var(--text)}
+.btn-next{flex:1;padding:13px;background:var(--accent);border:none;border-radius:10px;color:#fff;font-size:14px;font-weight:700;cursor:pointer;font-family:'Plus Jakarta Sans',sans-serif;box-shadow:0 4px 18px rgba(30,64,255,.35);transition:all .2s}
+.btn-next:hover{opacity:.9;transform:translateY(-1px)}
+.btn-next:disabled{opacity:.45;cursor:not-allowed;transform:none}
+.spinner{display:inline-block;width:15px;height:15px;border:2px solid rgba(255,255,255,.3);border-top-color:#fff;border-radius:50%;animation:spin .7s linear infinite;vertical-align:middle;margin-right:6px}
+@keyframes spin{to{transform:rotate(360deg)}}
+
+/* Alert */
+.alert{padding:10px 14px;border-radius:9px;font-size:13px;margin-bottom:1rem;display:none}
+.alert-err{background:rgba(255,107,107,.1);color:var(--red);border:1px solid rgba(255,107,107,.2)}
+
+/* Success */
+.success-card{display:none;background:var(--card);border:1px solid var(--border);border-radius:20px;padding:3rem 2rem;text-align:center;box-shadow:var(--shadow)}
+.success-icon{width:64px;height:64px;border-radius:50%;background:rgba(0,212,170,.12);border:2px solid rgba(0,212,170,.3);display:flex;align-items:center;justify-content:center;font-size:28px;margin:0 auto 1.25rem}
+.success-card h2{font-size:1.4rem;font-weight:800;margin-bottom:.5rem}
+.success-card p{color:var(--muted);font-size:14px;line-height:1.6;margin-bottom:1.5rem}
+.btn-go{display:inline-block;padding:13px 32px;background:var(--accent);border:none;border-radius:10px;color:#fff;font-size:14px;font-weight:700;cursor:pointer;font-family:'Plus Jakarta Sans',sans-serif;box-shadow:0 4px 18px rgba(30,64,255,.35);text-decoration:none;transition:all .2s}
+.btn-go:hover{opacity:.9;transform:translateY(-1px)}
+
+.footer-note{text-align:center;margin-top:1.25rem;font-size:12px;color:var(--muted)}
+.footer-note a{color:var(--accent);text-decoration:none}
+
+@media(max-width:500px){.field-row,.opt-grid{grid-template-columns:1fr}.form-card{padding:1.5rem}}
+</style>
+</head>
+<body>
+
+<header class="header">
+  <a class="logo" href="/">
+    <div><div class="logo-text"><img src="/img/logo-bims-erp-128.png" alt="BIMS ERP" style="height:28px;display:block"/></div><div class="logo-tag">by Ciarbis</div></div>
+  </a>
+  <div class="header-right">
+    <button class="btn-theme" id="btnTheme">🌙</button>
+    <a href="/login" class="btn-login">Iniciar sesión</a>
+  </div>
+</header>
+
+<main class="main">
+<div class="container">
+
+  <div class="hero">
+    <div class="hero-badge">⚡ 14 días gratis · Sin tarjeta</div>
+    <h1>Registrá tu empresa<br>en <img src="/img/logo-bims-erp-128.png" alt="BIMS ERP" style="height:34px;vertical-align:-7px"/></h1>
+    <p>Completá el formulario en 3 pasos y empezá hoy.</p>
+  </div>
+
+  <div class="progress-wrap">
+    <div class="progress-labels">
+      <span class="plabel active" id="pl1">1. Tu empresa</span>
+      <span class="plabel" id="pl2">2. Tu negocio</span>
+      <span class="plabel" id="pl3">3. Acceso</span>
+    </div>
+    <div class="pbar"><div class="pfill" id="pfill" style="width:33%"></div></div>
+  </div>
+
+  <div class="alert alert-err" id="alertErr"></div>
+
+  <div class="form-card" id="formCard">
+
+    <!-- STEP 1 -->
+    <div class="step active" id="s1">
+      <div class="step-num">Paso 1 de 3</div>
+      <div class="step-title">Datos de tu empresa</div>
+      <div class="step-sub">Esta información configura tu espacio en BIMS ERP.</div>
+
+      <div class="field">
+        <label class="flabel">Nombre de la empresa *</label>
+        <input class="finput" type="text" id="f-empresa" placeholder="Ej: Ferretería El Clavo S.A." autocomplete="organization">
+        <div class="ferr" id="e-empresa">Ingresá el nombre de tu empresa</div>
+      </div>
+      <div class="field-row">
+        <div class="field"><label class="flabel">CUIT (opcional)</label><input class="finput" type="text" id="f-cuit" placeholder="20-12345678-9"></div>
+        <div class="field"><label class="flabel">Teléfono / WhatsApp</label><input class="finput" type="tel" id="f-tel" placeholder="+54 9 11 0000-0000"></div>
+      </div>
+      <div class="field-row">
+        <div class="field"><label class="flabel">Ciudad</label><input class="finput" type="text" id="f-ciudad" placeholder="Buenos Aires"></div>
+        <div class="field"><label class="flabel">Provincia / País</label>
+          <select class="finput" id="f-pais">
+            <option value="">Seleccionar...</option>
+            <option>Buenos Aires</option><option>CABA</option><option>Córdoba</option>
+            <option>Rosario</option><option>Mendoza</option><option>Tucumán</option>
+            <option>Otra provincia</option><option>Uruguay</option><option>Chile</option><option>Otro país</option>
+          </select>
+        </div>
+      </div>
+      <div class="field">
+        <label class="flabel">Cantidad de empleados</label>
+        <select class="finput" id="f-tamano">
+          <option value="">Seleccionar...</option>
+          <option value="1-5">1 a 5</option><option value="6-20">6 a 20</option>
+          <option value="21-50">21 a 50</option><option value="51-200">51 a 200</option><option value="200+">Más de 200</option>
+        </select>
+      </div>
+      <div class="form-nav"><button class="btn-next" onclick="goS2()">Continuar →</button></div>
+    </div>
+
+    <!-- STEP 2 -->
+    <div class="step" id="s2">
+      <div class="step-num">Paso 2 de 3</div>
+      <div class="step-title">¿A qué se dedica?</div>
+      <div class="step-sub">Elegí tu industria para adaptar BIMS ERP a tu flujo.</div>
+
+      <div class="field">
+        <label class="flabel">Industria / Rubro *</label>
+        <div class="opt-grid" id="indGrid">
+          <button class="opt-btn" data-v="kiosko" onclick="selInd(this)"><span class="opt-icon">🏪</span>Kiosko</button>
+          <button class="opt-btn" data-v="almacen" onclick="selInd(this)"><span class="opt-icon">🛍️</span>Almacén</button>
+          <button class="opt-btn" data-v="supermercado" onclick="selInd(this)"><span class="opt-icon">🛒</span>Supermercado</button>
+          <button class="opt-btn" data-v="minimercado" onclick="selInd(this)"><span class="opt-icon">🏬</span>Minimercado</button>
+          <button class="opt-btn" data-v="dietetica" onclick="selInd(this)"><span class="opt-icon">🥗</span>Dietética</button>
+          <button class="opt-btn" data-v="indumentaria" onclick="selInd(this)"><span class="opt-icon">👕</span>Indumentaria / Showroom</button>
+          <button class="opt-btn" data-v="tecnologia" onclick="selInd(this)"><span class="opt-icon">💻</span>Negocio de tecnología</button>
+          <button class="opt-btn" data-v="ecommerce" onclick="selInd(this)"><span class="opt-icon">🛒</span>E-Commerce</button>
+          <button class="opt-btn" data-v="otro" onclick="selInd(this)"><span class="opt-icon">🏢</span>Otro rubro</button>
+        </div>
+        <div class="ferr" id="e-ind">Seleccioná tu industria</div>
+      </div>
+      <div id="wOtro" style="display:none" class="field">
+        <label class="flabel">Especificá tu rubro</label>
+        <input class="finput" type="text" id="f-otro" placeholder="Ej: Ferretería, Indumentaria...">
+      </div>
+      <div class="field" id="wModulos" style="display:none">
+        <label class="flabel">Módulos que necesitás</label>
+        <div class="step-sub" style="margin-bottom:.6rem">Te sugerimos estos según tu rubro. Podés destildar los que no uses.</div>
+        <div class="mod-grid" id="modGrid"></div>
+      </div>
+      <div class="field-row">
+        <div class="field"><label class="flabel">Sucursales</label>
+          <select class="finput" id="f-suc"><option value="1">1 sucursal</option><option value="2-3">2 a 3</option><option value="4-10">4 a 10</option><option value="10+">Más de 10</option></select>
+        </div>
+        <div class="field"><label class="flabel">Sistema actual</label>
+          <select class="finput" id="f-sis"><option value="ninguno">Sin sistema</option><option value="excel">Excel</option><option value="tango">Tango Gestión</option><option value="odoo">Odoo</option><option value="otro">Otro ERP</option></select>
+        </div>
+      </div>
+      <div class="form-nav">
+        <button class="btn-back" onclick="goStep(1)">← Atrás</button>
+        <button class="btn-next" onclick="goS3()">Continuar →</button>
+      </div>
+    </div>
+
+    <!-- STEP 3 -->
+    <div class="step" id="s3">
+      <div class="step-num">Paso 3 de 3</div>
+      <div class="step-title">Creá tu acceso</div>
+      <div class="step-sub">Serás el administrador principal de tu empresa.</div>
+
+      <div class="field-row">
+        <div class="field"><label class="flabel">Tu nombre *</label><input class="finput" type="text" id="f-nombre" placeholder="Juan García" autocomplete="name"><div class="ferr" id="e-nombre">Ingresá tu nombre</div></div>
+        <div class="field"><label class="flabel">Cargo</label><input class="finput" type="text" id="f-cargo" placeholder="Gerente, Dueño..."></div>
+      </div>
+      <div class="field">
+        <label class="flabel">Email de acceso *</label>
+        <input class="finput" type="email" id="f-email" placeholder="juan@miempresa.com" autocomplete="email">
+        <div class="ferr" id="e-email">Ingresá un email válido</div>
+      </div>
+      <div class="field">
+        <label class="flabel">Contraseña *</label>
+        <div class="pwd-wrap">
+          <input class="finput" type="password" id="f-pwd" placeholder="Mínimo 8 caracteres" autocomplete="new-password" oninput="chkPwd(this.value)" style="padding-right:40px">
+          <button class="pwd-toggle" type="button" onclick="tgPwd()">👁</button>
+        </div>
+        <div class="pwd-bar"><div class="pwd-fill" id="pwdFill"></div></div>
+        <div class="pwd-hint" id="pwdHint">Usá letras, números y un símbolo</div>
+        <div class="ferr" id="e-pwd">Mínimo 8 caracteres</div>
+      </div>
+      <div class="form-nav">
+        <button class="btn-back" onclick="goStep(2)">← Atrás</button>
+        <button class="btn-next" id="btnSubmit" onclick="submit()"><span id="btnTxt">Crear mi cuenta</span></button>
+      </div>
+    </div>
+
+  </div><!-- /form-card -->
+
+  <!-- SUCCESS -->
+  <div class="success-card" id="successCard">
+    <div class="success-icon">✅</div>
+    <h2>¡Cuenta creada!</h2>
+    <p>Tu empresa fue registrada correctamente.<br>Redirigiendo al sistema en <strong id="cd">3</strong>s...</p>
+    <a href="/login" class="btn-go">Ir al sistema →</a>
+  </div>
+
+  <div class="footer-note">¿Ya tenés cuenta? <a href="/login">Iniciá sesión</a></div>
+
+</div>
+</main>
+
+<script>
+// Theme
+const html = document.documentElement
+const btn = document.getElementById('btnTheme')
+const t = localStorage.getItem('nexo-theme') || 'dark'
+html.setAttribute('data-theme', t); btn.textContent = t === 'dark' ? '☀️' : '🌙'
+btn.onclick = () => { const nt = html.getAttribute('data-theme') === 'dark' ? 'light' : 'dark'; html.setAttribute('data-theme', nt); localStorage.setItem('nexo-theme', nt); btn.textContent = nt === 'dark' ? '☀️' : '🌙' }
+
+let industria = ''
+let modulosCatalogo = []
+let rubroDefaults = {}
+let modulosSeleccionados = new Set()
+
+// Catálogo de módulos — público, no requiere token (ver src/lib/modulos.js en el backend)
+fetch('/api/v1/auth/modulos-catalogo').then(r => r.json()).then(d => {
+  modulosCatalogo = d.catalogo || []
+  rubroDefaults = d.rubroDefaults || {}
+  renderModGrid()
+}).catch(() => {})
+
+function renderModGrid() {
+  const grid = document.getElementById('modGrid')
+  grid.innerHTML = modulosCatalogo.map(m => {
+    const checked = modulosSeleccionados.has(m.id)
+    if (m.comingSoon) {
+      return `<label class="mod-item soon"><input type="checkbox" disabled><span class="mod-icon">${m.icon}</span><span class="mod-label">${m.label}</span><span class="mod-soon-tag">PRÓXIMAMENTE</span></label>`
+    }
+    return `<label class="mod-item${checked ? ' checked' : ''}"><input type="checkbox" ${checked ? 'checked' : ''} onchange="toggleMod('${m.id}')"><span class="mod-icon">${m.icon}</span><span class="mod-label">${m.label}</span></label>`
+  }).join('')
+}
+
+function toggleMod(id) {
+  if (modulosSeleccionados.has(id)) modulosSeleccionados.delete(id)
+  else modulosSeleccionados.add(id)
+  renderModGrid()
+}
+
+function goStep(n) {
+  document.querySelector('.step.active').classList.remove('active')
+  document.getElementById('s' + n).classList.add('active')
+  const pct = n === 1 ? 33 : n === 2 ? 66 : 100
+  document.getElementById('pfill').style.width = pct + '%'
+  for (let i = 1; i <= 3; i++) {
+    const el = document.getElementById('pl' + i)
+    el.className = 'plabel' + (i < n ? ' done' : i === n ? ' active' : '')
+  }
+  document.getElementById('alertErr').style.display = 'none'
+  window.scrollTo({ top: 0, behavior: 'smooth' })
+}
+
+function goS2() {
+  const v = document.getElementById('f-empresa').value.trim()
+  if (!v) { showFerr('e-empresa', true); return }
+  showFerr('e-empresa', false); goStep(2)
+}
+function goS3() {
+  if (!industria) { showFerr('e-ind', true); return }
+  showFerr('e-ind', false); goStep(3)
+}
+
+function selInd(el) {
+  document.querySelectorAll('.opt-btn').forEach(b => b.classList.remove('selected'))
+  el.classList.add('selected'); industria = el.dataset.v
+  showFerr('e-ind', false)
+  document.getElementById('wOtro').style.display = industria === 'otro' ? 'block' : 'none'
+
+  // Precargar módulos sugeridos para el rubro elegido (el usuario los puede destildar)
+  modulosSeleccionados = new Set(rubroDefaults[industria] || rubroDefaults.otro || [])
+  document.getElementById('wModulos').style.display = 'block'
+  renderModGrid()
+}
+
+function chkPwd(v) {
+  const score = [v.length >= 8, /[A-Z]/.test(v), /[0-9]/.test(v), /[^A-Za-z0-9]/.test(v)].filter(Boolean).length
+  const cols = ['','#FF6B6B','#FFB347','#00D4AA','#1E40FF']
+  const labs = ['','Muy débil','Regular','Buena','Muy segura']
+  const f = document.getElementById('pwdFill')
+  f.style.width = (score * 25) + '%'; f.style.background = cols[score] || ''
+  const h = document.getElementById('pwdHint')
+  h.textContent = score > 0 ? labs[score] : 'Usá letras, números y un símbolo'
+  h.style.color = cols[score] || 'var(--muted)'
+}
+
+function tgPwd() { const i = document.getElementById('f-pwd'); i.type = i.type === 'password' ? 'text' : 'password' }
+
+async function submit() {
+  const nombre = document.getElementById('f-nombre').value.trim()
+  const email = document.getElementById('f-email').value.trim()
+  const password = document.getElementById('f-pwd').value
+  const empresa = document.getElementById('f-empresa').value.trim()
+  const cuit = document.getElementById('f-cuit').value.trim()
+  let ok = true
+  if (!nombre) { showFerr('e-nombre', true); ok = false } else showFerr('e-nombre', false)
+  if (!email || !/^[^@]+@[^@]+\.[^@]+$/.test(email)) { showFerr('e-email', true); ok = false } else showFerr('e-email', false)
+  if (!password || password.length < 8) { showFerr('e-pwd', true); ok = false } else showFerr('e-pwd', false)
+  if (!ok) return
+
+  const btnS = document.getElementById('btnSubmit')
+  const txt = document.getElementById('btnTxt')
+  btnS.disabled = true
+  txt.innerHTML = '<span class="spinner"></span> Creando cuenta...'
+
+  try {
+    const res = await fetch('/api/v1/auth/register', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ empresa, cuit, nombre, email, password, rubro: industria, modulos: [...modulosSeleccionados] })
+    })
+    const data = await res.json()
+    if (!res.ok) throw new Error(data.message || 'Error al registrar')
+
+    // Guardar token
+    if (data.token) { localStorage.setItem('nexo_token', data.token); localStorage.setItem('nexo_api_user', JSON.stringify(data.user)) }
+
+    // Mostrar success y redirigir
+    document.getElementById('formCard').style.display = 'none'
+    document.getElementById('successCard').style.display = 'block'
+    let c = 3; const cdEl = document.getElementById('cd')
+    const iv = setInterval(() => { cdEl.textContent = --c; if (c <= 0) { clearInterval(iv); window.location.href = '/dashboard' } }, 1000)
+
+  } catch(e) {
+    document.getElementById('alertErr').textContent = e.message; document.getElementById('alertErr').style.display = 'block'
+    btnS.disabled = false; txt.textContent = 'Crear mi cuenta'
+  }
+}
+
+function showFerr(id, show) { document.getElementById(id).style.display = show ? 'block' : 'none' }
+</script>
+</body>
+</html>

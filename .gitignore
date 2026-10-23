@@ -1,0 +1,12 @@
+node_modules/
+.env
+.env.*
+!.env.example
+dist/
+tmp/
+*.log
+perf_log.jsonl
+*.stackdump
+.DS_Store
+# Se arma desde print-bridge/ para descargar; no versionar el zip.
+print-bridge.zip

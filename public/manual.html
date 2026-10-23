@@ -1,0 +1,399 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="robots" content="noindex, nofollow">
+<title>Instructivo BIMS ERP — Uso interno</title>
+<style>
+  :root{
+    --bg:#07080F;--surface:#0D0F1A;--surface2:#141622;--card:#141622;
+    --border:rgba(255,255,255,0.08);--border-md:rgba(255,255,255,0.12);
+    --text:#F0EFF8;--text2:#8B8FA8;--text3:#5A5F75;
+    --grad1:#7C3AED;--grad2:#06B6D4;--accent-text:#8B93FF;
+  }
+  *{box-sizing:border-box}
+  body{
+    margin:0;background:var(--bg);color:var(--text);
+    font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+    line-height:1.55;
+  }
+  a{color:var(--accent-text)}
+  .hero{
+    padding:56px 24px 40px;text-align:center;
+    background:radial-gradient(ellipse at top, rgba(124,58,237,0.18), transparent 60%),
+               radial-gradient(ellipse at bottom right, rgba(6,182,212,0.14), transparent 55%);
+    border-bottom:1px solid var(--border);
+  }
+  .logo-mark{display:inline-flex;align-items:flex-end;gap:4px;margin-bottom:18px}
+  .logo-mark .bar{width:10px;border-radius:3px 3px 0 0;background:linear-gradient(180deg,var(--grad2),var(--grad1))}
+  .logo-mark .b1{height:16px}.logo-mark .b2{height:26px}.logo-mark .b3{height:36px}.logo-mark .b4{height:48px}
+  .logo-word{
+    font-size:34px;font-weight:800;letter-spacing:1px;margin:0 0 4px;
+    background:linear-gradient(90deg,var(--grad1),var(--grad2));
+    -webkit-background-clip:text;background-clip:text;color:transparent;
+  }
+  .logo-sub{font-size:11px;letter-spacing:2px;color:var(--text3);text-transform:uppercase;margin-bottom:28px}
+  .hero h1{font-size:28px;margin:0 0 8px;color:var(--text)}
+  .hero h1 b{
+    background:linear-gradient(90deg,var(--grad2),var(--grad1));
+    -webkit-background-clip:text;background-clip:text;color:transparent;
+  }
+  .hero p.tag{color:var(--text2);font-size:13px;letter-spacing:1px;text-transform:uppercase;margin:0}
+  .badge-interno{
+    display:inline-block;margin-top:18px;font-size:11px;letter-spacing:.5px;
+    color:#FFB86B;background:rgba(255,184,107,0.12);border:1px solid rgba(255,184,107,0.3);
+    padding:5px 12px;border-radius:999px;
+  }
+  .layout{display:flex;max-width:1180px;margin:0 auto;align-items:flex-start}
+  nav.toc{
+    position:sticky;top:0;width:260px;flex-shrink:0;padding:32px 16px 60px 24px;
+    max-height:100vh;overflow-y:auto;
+  }
+  nav.toc a{
+    display:block;padding:7px 12px;border-radius:8px;color:var(--text2);
+    text-decoration:none;font-size:13px;
+  }
+  nav.toc a:hover{background:var(--surface2);color:var(--text)}
+  nav.toc .toc-title{font-size:11px;text-transform:uppercase;letter-spacing:1px;color:var(--text3);padding:8px 12px 4px}
+  main{flex:1;min-width:0;padding:40px 24px 100px;max-width:820px}
+  section{margin-bottom:44px;scroll-margin-top:20px}
+  section h2{
+    font-size:22px;margin:0 0 14px;padding-bottom:10px;border-bottom:1px solid var(--border);
+    color:var(--text);
+  }
+  section h3{font-size:15px;margin:22px 0 8px;color:var(--accent-text)}
+  section p{color:var(--text2);margin:0 0 12px}
+  section ul, section ol{color:var(--text2);padding-left:22px;margin:0 0 14px}
+  section li{margin-bottom:6px}
+  section li b, p b{color:var(--text)}
+  .callout{
+    background:var(--surface2);border:1px solid var(--border-md);border-left:3px solid var(--grad2);
+    border-radius:8px;padding:12px 16px;margin:16px 0;font-size:13.5px;color:var(--text2);
+  }
+  .callout.warn{border-left-color:#F5A623}
+  .callout.info b{color:var(--text)}
+  .nav-map{
+    border:1px solid var(--border);border-radius:12px;overflow:hidden;margin:18px 0;
+  }
+  .nav-map .row{display:flex;border-bottom:1px solid var(--border)}
+  .nav-map .row:last-child{border-bottom:none}
+  .nav-map .k{
+    width:150px;flex-shrink:0;padding:12px 14px;background:var(--surface2);
+    font-weight:600;color:var(--text);font-size:13.5px;
+  }
+  .nav-map .v{padding:12px 14px;font-size:13.5px;color:var(--text2)}
+  .footer-note{
+    max-width:820px;margin:0 auto 60px;padding:0 24px;color:var(--text3);font-size:12px;
+    border-top:1px solid var(--border);padding-top:18px;
+  }
+  code{background:var(--surface2);padding:1px 6px;border-radius:5px;font-size:12.5px}
+  @media (max-width:860px){
+    nav.toc{display:none}
+    main{max-width:100%;padding:28px 18px 80px}
+  }
+</style>
+</head>
+<body>
+
+<div class="hero">
+  <div class="logo-mark"><span class="bar b1"></span><span class="bar b2"></span><span class="bar b3"></span><span class="bar b4"></span></div>
+  <div class="logo-word">BIMS</div>
+  <div class="logo-sub">Business Intelligent Management Systems</div>
+  <h1>Instructivo para usar <b>BIMS ERP</b></h1>
+  <p class="tag">Un sistema · Todas las áreas · Mejores decisiones</p>
+  <div class="badge-interno">🔒 Documento de uso interno — no distribuir el enlace</div>
+</div>
+
+<div class="layout">
+  <nav class="toc">
+    <div class="toc-title">Contenido</div>
+    <a href="#intro">Qué es BIMS ERP</a>
+    <a href="#ingreso">Ingreso al sistema</a>
+    <a href="#navegacion">Menú de navegación</a>
+    <a href="#pantalla-principal">Pantalla principal</a>
+    <a href="#ajustes">Opción Ajustes</a>
+    <a href="#inventario">Inventario</a>
+    <a href="#compras">Compras</a>
+    <a href="#caja">Caja</a>
+    <a href="#ventas">Ventas</a>
+    <a href="#finanzas">Finanzas</a>
+    <a href="#auditoria">Auditoría</a>
+    <a href="#clientes">Clientes</a>
+    <a href="#fichajes">Fichajes</a>
+    <a href="#recomendaciones">Recomendaciones de uso</a>
+  </nav>
+
+  <main>
+
+    <section id="intro">
+      <h2>Qué es BIMS ERP</h2>
+      <p><b>BIMS — Business Intelligent Management Systems</b> es un sistema WebApp inteligente para
+      la gestión de tu negocio: <b>ERP + CRM + IA, todo en un lugar</b>. Desarrollamos soluciones
+      especializadas por vertical, que integran y ordenan la información de todas las áreas del
+      negocio y utilizan Agentes IA para atender clientes, automatizar procesos y ayudar a la
+      gerencia en la toma de decisiones.</p>
+    </section>
+
+    <section id="ingreso">
+      <h2>Ingreso al sistema</h2>
+      <ol>
+        <li>Abrir el navegador de internet.</li>
+        <li>Ingresar a la plataforma de BIMS (<a href="http://erp.ciarbis.com" target="_blank" rel="noopener">erp.ciarbis.com</a>).</li>
+        <li>Registro de cuenta gratis.</li>
+      </ol>
+      <p>Durante el registro, el usuario selecciona el tipo de negocio (kiosco, almacén, showroom,
+      etc.), lo que permite al sistema auto-configurarse con los módulos pertinentes, además de
+      permitir la gestión de múltiples sucursales y roles de usuario definidos como dueño,
+      sucursal, empleado o super administrador.</p>
+      <div class="callout warn"><b>Recomendación:</b> cada usuario debe tener su propia cuenta y no compartir su contraseña.</div>
+    </section>
+
+    <section id="navegacion">
+      <h2>Menú de navegación</h2>
+      <p>El menú principal (izquierda) tiene una versión contraída y otra expandida. Cada ítem
+      lleva a un módulo del sistema:</p>
+      <div class="nav-map">
+        <div class="row"><div class="k">Inicio</div><div class="v">Dashboard principal, reportes y métricas generales de todo el negocio.</div></div>
+        <div class="row"><div class="k">Inventario</div><div class="v">Control de todo el stock del negocio.</div></div>
+        <div class="row"><div class="k">Ventas</div><div class="v">Registro de todas las ventas del negocio.</div></div>
+        <div class="row"><div class="k">Clientes</div><div class="v">Registro de todos los clientes y módulo integrado de CRM.</div></div>
+        <div class="row"><div class="k">Compras</div><div class="v">Registro de todas las compras y órdenes de compra.</div></div>
+        <div class="row"><div class="k">Caja</div><div class="v">Sistema de caja o punto de venta, con lectura de código de barra y emisión de ticket X y fiscal.</div></div>
+        <div class="row"><div class="k">Fichaje</div><div class="v">Registro de fichajes de entrada, descanso y salida de los empleados.</div></div>
+        <div class="row"><div class="k">Finanzas</div><div class="v">Donde el contador puede controlar la situación contable.</div></div>
+        <div class="row"><div class="k">Auditoría</div><div class="v">Control y registro de todos los cambios realizados por empleados y dueños en caja, fichajes y stock.</div></div>
+        <div class="row"><div class="k">Ajustes</div><div class="v">Configuración de todo el negocio: usuarios, empresa, facturación, caja, sucursales, medios de pago, listas de precio, cupones y puntos, entre otros.</div></div>
+      </div>
+    </section>
+
+    <section id="pantalla-principal">
+      <h2>Pantalla principal</h2>
+      <p>Desde el menú principal se pueden encontrar las métricas y las diferentes opciones del
+      sistema: accesos directos a cada módulo, un resumen (productos, clientes, ventas acumuladas,
+      OV registradas) y una sección de reportes y métricas con selector de período.</p>
+
+      <h3>Precio del dólar</h3>
+      <p>También se puede ver el precio del dólar en tiempo real (Oficial, Blue, USDT y un valor
+      Manual). Se puede actualizar la información y seleccionar con una estrella el valor
+      preferente o más utilizado. Además se puede establecer un valor manual, según lo desee el
+      usuario. En la campanita de arriba a la derecha aparecen alertas por stock bajo, cajas
+      abiertas o vencimientos próximos.</p>
+
+      <h3>Centro de control</h3>
+      <p>Desde acá se puede elegir tener un panorama completo como administrador, vendedor,
+      depósito o contador; también existe la opción de visualizar las métricas en dólares o en
+      pesos (vía API), y elegir entre modo oscuro y modo claro. Otras opciones ubicadas en el
+      centro de control son: editar perfil, editar empresa y temas — estos botones redirigen a la
+      opción de Ajustes.</p>
+    </section>
+
+    <section id="ajustes">
+      <h2>Opción Ajustes</h2>
+
+      <h3>Empresa</h3>
+      <p>El usuario puede cargar datos de la empresa, como el CUIT, su condición de IVA y también
+      realizar la configuración para emitir facturas.</p>
+
+      <h3>Mi perfil</h3>
+      <p>El usuario puede editar su perfil y personalizarlo a su manera.</p>
+
+      <h3>Usuarios</h3>
+      <p>El super administrador puede crear usuarios y establecer sus roles: administrador,
+      vendedor, depósito, producción, contador o logística. También se puede crear otro rol a
+      medida.</p>
+
+      <h3>Módulos</h3>
+      <p>Si se necesita un nuevo módulo, se puede solicitar presionando el botón <b>"Solicitar
+      activación de módulos"</b>, que redirige a WhatsApp para recibir asistencia.</p>
+
+      <h3>Razones sociales</h3>
+      <p>Se pueden agregar las razones sociales que utiliza el negocio, y al momento de facturar
+      hay que seleccionar con cuál se quiere realizar la factura.</p>
+
+      <h3>Empleados</h3>
+      <p>Es posible gestionar diversas sucursales y asignar empleados con un número de legajo y un
+      PIN de seguridad personal, obligatorio para que el personal pueda realizar el fichaje de
+      entrada/salida, así como para abrir y cerrar la caja.</p>
+
+      <h3>Fichaje</h3>
+      <p>El sistema permite ver y exportar el historial de fichajes a un archivo de Excel para su
+      posterior revisión.</p>
+
+      <h3>Roles</h3>
+      <p>Se pueden ver todos los roles y eliminarlos si así se desea.</p>
+
+      <h3>Sucursales</h3>
+      <p>Se pueden crear sucursales y determinar cuál es la principal. Arriba a la derecha hay un
+      selector para elegir qué sucursal visualizar, o "Todas las sucursales" para ver los números
+      macro.</p>
+
+      <h3>Caja</h3>
+      <p>Para operar el punto de venta, el usuario puede vincular la cuenta con ARCA para la
+      emisión de facturas y seleccionar el tipo de impresora de tickets (58 u 80 mm). Además,
+      desde esta sección se pueden configurar etiquetas para los productos, con distintas opciones
+      de etiquetado según las necesidades del usuario. Se implementa un sistema de seguridad
+      mediante PIN, que permite autorizar la eliminación de productos en la caja para evitar
+      errores o fraudes, dejando un registro de auditoría de cada acción realizada.</p>
+
+      <h3>Variantes y lista de precios</h3>
+      <p>El sistema permite configurar variantes de producto como peso, talla o sabor.</p>
+
+      <h3>Lista de precio</h3>
+      <p>Se pueden gestionar diversas listas de precios para distintos tipos de clientes (mayorista,
+      minorista, distribuidor). Además, se pueden crear categorías y subcategorías y aplicar
+      márgenes de ganancia predeterminados a nivel general o por categoría.</p>
+
+      <h3>Cupones</h3>
+      <p>Es posible crear cupones de descuento con vigencia definida, límites de uso total y
+      restricciones por cliente, permitiendo combinar o excluir estos descuentos con las listas de
+      precios preexistentes.</p>
+
+      <h3>Puntos</h3>
+      <p>El sistema incluye un programa de fidelización basado en puntos, donde el usuario define
+      reglas de acumulación y condiciones de compra mínima para canjear recompensas. También
+      permite realizar bonificaciones tipo 2x1.</p>
+
+      <h3>Método de pago</h3>
+      <p>Relacionado con el pago de suscripciones — por este medio se elige cómo se quiere recibir
+      el pago.</p>
+
+      <h3>Temas</h3>
+      <p>Opción para personalizar los colores y medidas del sistema.</p>
+    </section>
+
+    <section id="inventario">
+      <h2>Inventario</h2>
+      <p>En este módulo se pueden cargar nuevos productos a través del botón <b>"+ Nuevo
+      producto"</b>. Esta sección permite definir descripción corta y larga, proveedor, código de
+      barras (escaneable con pistola), precio de costo y venta, stock inicial, stock mínimo (el
+      sistema avisa cuando se alcanza) y fechas de vencimiento.</p>
+      <ul>
+        <li>El sistema soporta la creación de <b>variantes</b>, donde cada una puede tener
+        características distintas (como tamaño o sabor); si el usuario olvida grabar una
+        variante, debe asegurarse de confirmar la acción para que quede guardada
+        correctamente.</li>
+        <li>El sistema facilita la edición de stock de manera masiva, la carga de productos
+        mediante Excel, y el registro de <b>"mermas"</b> por roturas, vencimientos o errores,
+        asegurando que cada diferencia de stock quede registrada para su futura auditoría.</li>
+        <li>Al modificar el stock, el sistema obliga al usuario a dejar una justificación,
+        manteniendo la integridad del registro.</li>
+      </ul>
+      <div class="callout warn"><b>Importante:</b> no tocar el SKU — se genera solo.</div>
+      <div class="callout info">La opción <b>Modificar stock</b> solo se usa para cambios generales
+      en depósito; para el ingreso de mercadería se opera desde <b>Compras</b>.</div>
+    </section>
+
+    <section id="compras">
+      <h2>Compras</h2>
+      <ul>
+        <li>El módulo de compras permite registrar proveedores.</li>
+        <li>Genera órdenes de compra especificando cantidades y precios, y confirma la recepción
+        de la mercadería.</li>
+        <li>Permite gestionar cuentas corrientes: el usuario puede ver el historial de deudas,
+        realizar pagos desde la caja o fondos propios, y reducir la deuda pendiente con el
+        proveedor.</li>
+      </ul>
+    </section>
+
+    <section id="caja">
+      <h2>Caja</h2>
+      <ul>
+        <li>Tras realizar el fichaje, el empleado puede abrir la caja con un fondo inicial,
+        procesar ventas, aplicar descuentos o cupones, y registrar pagos mediante diversos medios
+        (efectivo, QR, etc.). Es posible imprimir tickets no fiscales y fiscales al finalizar la
+        operación.</li>
+        <li><b>Anulación de tickets y notas de crédito:</b> ante una facturación errónea o si un
+        cliente desiste de una compra, el usuario puede realizar una nota de crédito, incluso para
+        tickets no fiscales, buscando el comprobante por su número único. Estas acciones quedan
+        registradas en el sistema de auditoría, lo que permite al dueño monitorear posibles
+        irregularidades o fraudes.</li>
+        <li><b>Cierre de caja y auditoría final:</b> al finalizar el turno, el usuario cierra la
+        caja contando el efectivo presente y comparándolo con el sistema, que discrimina
+        automáticamente las ventas por medio de pago (efectivo, QR, transferencia, etc.).</li>
+      </ul>
+    </section>
+
+    <section id="ventas">
+      <h2>Ventas</h2>
+      <p>El sistema permite buscar y revisar el detalle de las ventas pasadas utilizando el número
+      de ticket o, en caso de pérdida, ordenando las ventas por horario o fecha, lo cual facilita
+      la gestión de cambios y devoluciones.</p>
+      <ul>
+        <li><b>Personalización:</b> el usuario puede adaptar la interfaz de venta eligiendo entre
+        vista de grilla, categorías, e-commerce o lista tradicional, además de editar el ancho,
+        orden y visibilidad de las columnas para optimizar la experiencia de uso según sus
+        preferencias personales.</li>
+      </ul>
+    </section>
+
+    <section id="finanzas">
+      <h2>Finanzas</h2>
+      <ul>
+        <li>El módulo de finanzas permite registrar gastos operativos, como el pago de servicios
+        (ej. luz), categorizarlos, asignar la sucursal y el medio de pago (caja o transferencia
+        del dueño).</li>
+        <li>El sistema muestra el libro contable con el neto del día, ingresos totales y egresos,
+        proporcionando una métrica general en el panel principal.</li>
+        <li><b>Emisión de comprobantes e ingresos externos:</b> además de los tickets de venta, es
+        posible emitir facturas (A, B o C) a través del sistema en el módulo Finanzas, y registrar
+        ingresos externos provenientes de inversiones, plazos fijos u otras ventas por fuera de la
+        operatoria habitual de caja.</li>
+        <li>El dueño puede ver el historial detallado de cierres en auditorías para verificar si
+        hubo discrepancias o si la caja cuadró correctamente.</li>
+      </ul>
+    </section>
+
+    <section id="auditoria">
+      <h2>Auditoría</h2>
+      <ul>
+        <li>Registro de acciones realizadas por los usuarios.</li>
+        <li>Control de anulaciones, notas de crédito y eliminaciones de productos.</li>
+        <li>Registro y justificación de ajustes y mermas de stock, y movimientos de proveedores.</li>
+        <li>Historial de fichajes y cierres de caja.</li>
+      </ul>
+    </section>
+
+    <section id="clientes">
+      <h2>Clientes</h2>
+      <ul>
+        <li>Gestión de clientes y tipos de cliente.</li>
+        <li>Consulta de historial de compras.</li>
+        <li>Gestión de cambios, devoluciones y notas de crédito.</li>
+        <li>Emisión de comprobantes y registro de medios de pago.</li>
+      </ul>
+    </section>
+
+    <section id="fichajes">
+      <h2>Fichajes</h2>
+      <ul>
+        <li>Registro de entrada y salida mediante PIN personal.</li>
+        <li>Asociación del empleado con su sucursal y legajo.</li>
+        <li>Habilitación para abrir y cerrar la caja.</li>
+        <li>Consulta y exportación del historial de fichajes.</li>
+      </ul>
+    </section>
+
+    <section id="recomendaciones">
+      <h2>Recomendaciones de uso</h2>
+      <ul>
+        <li>No compartir usuarios ni contraseñas.</li>
+        <li>Revisar los datos antes de confirmar una operación.</li>
+        <li>Realizar controles periódicos de stock.</li>
+        <li>Cerrar la caja luego de cada turno.</li>
+        <li>Informar inmediatamente cualquier dificultad o error que se encuentre.</li>
+        <li>Si tiene alguna sugerencia o necesidad puntual que todavía no contemple la aplicación,
+        también puede comunicarse.</li>
+      </ul>
+    </section>
+
+  </main>
+</div>
+
+<div class="footer-note">
+  Documento interno — convertido desde <code>manual_de_uso.pdf</code>. Página sin enlace desde la
+  landing ni desde el ERP; accesible solo vía URL directa (<code>/manual</code>).
+</div>
+
+</body>
+</html>
