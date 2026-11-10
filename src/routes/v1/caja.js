@@ -174,7 +174,9 @@ export default async function cajaRoutes(fastify) {
         orderBy: { fecha: 'desc' },
       })
       const estadoActual = ultimoFichaje ? ultimoFichaje.tipo : 'SALIDA'
-      if (estadoActual !== 'INGRESO' && estadoActual !== 'REGRESO') {
+      // Con Fichaje oculto (Ajustes > Módulos) el legajo identifica al cajero, pero no se exige fichar.
+      const fichajeActivo = !(req.tenantOcultos || []).includes('fichaje')
+      if (fichajeActivo && estadoActual !== 'INGRESO' && estadoActual !== 'REGRESO') {
         return reply.status(409).send({ error: 'sin_fichaje', message: 'Tenés que fichar tu ingreso antes de abrir la caja.' })
       }
       empleadoId = emp.id

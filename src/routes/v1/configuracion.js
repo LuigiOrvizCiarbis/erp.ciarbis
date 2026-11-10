@@ -8,7 +8,7 @@ import bcrypt from 'bcryptjs'
 import { prisma } from '../../lib/prisma.js'
 import { invalidarCacheAuth } from '../../lib/authCache.js'
 import { tituloCase } from '../../lib/textUtils.js'
-import { SELF_SERVICE_IDS } from '../../lib/modulos.js'
+import { SELF_SERVICE_IDS, OCULTABLE_IDS } from '../../lib/modulos.js'
 
 const tenantSchema = z.object({
   nombre: z.string().min(1).optional(),
@@ -49,20 +49,23 @@ export default async function configuracionRoutes(fastify) {
   // superadmin. Devuelve la lista nueva para que el frontend actualice el menú sin re-login.
   fastify.put('/configuracion/modulos/:id', adminOnly, async (req, reply) => {
     const id = req.params.id
-    if (!SELF_SERVICE_IDS.includes(id)) {
+    // Módulos base (fichaje/auditoría): no se activan por plan, se muestran u ocultan.
+    // Un solo UPDATE atómico (array_remove + append): dos toggles tocados casi a la vez no se
+    // pisan entre sí (leer-modificar-escribir perdía uno de los dos cambios).
+    const ocultable = OCULTABLE_IDS.includes(id)
+    if (!ocultable && !SELF_SERVICE_IDS.includes(id)) {
       return reply.status(403).send({ error: 'no_self_service', message: 'Este módulo lo activa nuestro equipo — contactanos.' })
     }
     const activo = !!req.body?.activo
-    const actual = await prisma.tenant.findUnique({ where: { id: req.tenantId }, select: { modulosActivos: true } })
-    const set = new Set(actual?.modulosActivos || [])
-    if (activo) set.add(id); else set.delete(id)
-    const tenant = await prisma.tenant.update({
-      where: { id: req.tenantId },
-      data: { modulosActivos: [...set] },
-      select: { modulosActivos: true },
-    })
+    const agregar = ocultable ? !activo : activo // en ocultos se agrega al ocultar; en activos al activar
+    const col = ocultable ? 'modulosOcultos' : 'modulosActivos'
+    await prisma.$executeRawUnsafe(
+      `UPDATE "tenants" SET "${col}" = array_remove(COALESCE("${col}", ARRAY[]::text[]), $1) || CASE WHEN $2 THEN ARRAY[$1]::text[] ELSE ARRAY[]::text[] END WHERE "id" = $3`,
+      id, agregar, req.tenantId,
+    )
+    const tenant = await prisma.tenant.findUnique({ where: { id: req.tenantId }, select: { modulosActivos: true, modulosOcultos: true } })
     invalidarCacheAuth()
-    return { ok: true, modulosActivos: tenant.modulosActivos }
+    return { ok: true, modulosActivos: tenant.modulosActivos, ...(ocultable && { modulosOcultos: tenant.modulosOcultos }) }
   })
 
   // ── GET /configuracion ────────────────────────────────────

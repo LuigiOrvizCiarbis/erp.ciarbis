@@ -65,6 +65,7 @@ async function main() {
   const cotizacionDolarRoutes = (await import('./src/routes/v1/cotizacionDolar.js')).default
   const soporteRoutes = (await import('./src/routes/v1/soporte.js')).default
   const tallerRoutes = (await import('./src/routes/v1/taller.js')).default
+  const produccionRoutes = (await import('./src/routes/v1/produccion.js')).default
 
   const app = Fastify({ logger: { level: 'warn' }, trustProxy: true })
 
@@ -139,6 +140,7 @@ async function main() {
   await app.register(cotizacionDolarRoutes, v1)
   await app.register(soporteRoutes, v1)
   await app.register(tallerRoutes, v1)
+  await app.register(produccionRoutes, v1)
 
   app.get('/health', async () => ({
     status: 'ok', version: '2.0.0',

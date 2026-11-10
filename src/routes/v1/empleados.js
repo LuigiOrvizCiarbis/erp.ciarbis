@@ -138,6 +138,9 @@ export default async function empleadosRoutes(fastify) {
 
   // ── POST /fichajes ──────────────────────────────────────────
   fastify.post('/fichajes', auth, async (req, reply) => {
+    if ((req.tenantOcultos || []).includes('fichaje')) {
+      return reply.status(403).send({ error: 'modulo_oculto', message: 'El fichaje está desactivado. Un administrador lo puede activar desde Ajustes → Módulos.' })
+    }
     const body = fichajeSchema.safeParse(req.body)
     if (!body.success) return reply.status(400).send({ error: 'validation_error', message: body.error.errors[0].message })
     const { legajo, tipo, sucursalId, pin } = body.data

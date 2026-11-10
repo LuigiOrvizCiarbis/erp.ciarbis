@@ -15,7 +15,7 @@ async function tenantPluginFn(fastify) {
       if (!tenant) {
         tenant = await prisma.tenant.findUnique({
           where: { id: req.user.tenantId },
-          select: { id: true, activo: true, plan: true, planVence: true, trialVence: true, facAutoEnabled: true, ptoVta: true, condIVA: true, modulosActivos: true },
+          select: { id: true, activo: true, plan: true, planVence: true, trialVence: true, facAutoEnabled: true, ptoVta: true, condIVA: true, modulosActivos: true, modulosOcultos: true },
         })
         if (tenant) cacheTenant.guardar(req.user.tenantId, tenant)
       }
@@ -36,6 +36,7 @@ async function tenantPluginFn(fastify) {
 
       req.tenantId = tenant.id
       req.tenantModulos = tenant.modulosActivos || []
+      req.tenantOcultos = tenant.modulosOcultos || []
     })
   }
 }

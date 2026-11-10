@@ -1683,11 +1683,17 @@ function canAccess(mod){
 // Los baseline (home/reportes/config) siempre están activos.
 function isModuleActive(mod){
   if(mod==='clientes') mod='ventas';
+  if(moduloOculto(mod)) return false;
   if(BASELINE_MODULES.indexOf(mod) !== -1) return true;
   var modulos = (currentUser && currentUser.tenant && currentUser.tenant.modulosActivos) || [];
   return modulos.indexOf(mod) !== -1;
 }
 
+// Módulos base que el admin ocultó desde Ajustes > Módulos (V2.107.0: fichaje, auditoria).
+function moduloOculto(mod){
+  var o=(currentUser && currentUser.tenant && currentUser.tenant.modulosOcultos) || [];
+  return o.indexOf(mod)!==-1;
+}
 function mostrarModuloInactivo(mod){
   var label = moduleLabel(mod);
   openModal('<div style="text-align:center;padding:8px 4px">'
@@ -2044,6 +2050,10 @@ function showModule(mod, arg, _desdePopstate){
   }
   if(mod!=='home' && !canAccess(mod)){
     mainEl.innerHTML='<div class="perm-denied"><div class="icon">🔒</div><h3>Sin acceso</h3><p>Tu rol (<strong>'+(ROLE_LABELS[currentUser.rol]||currentUser.rol)+'</strong>) no tiene permiso para este módulo.</p></div>';
+    return;
+  }
+  if(moduloOculto(mod)){
+    mainEl.innerHTML='<div class="perm-denied"><div class="icon">🙈</div><h3>'+moduleLabel(mod)+' está oculto</h3><p>Un administrador lo puede volver a mostrar desde Ajustes → Módulos.</p></div>';
     return;
   }
   if(!isModuleActive(mod)){
@@ -10022,7 +10032,7 @@ async function pos_caja_legajo_verificar(){
   try {
     var r=await apiGet('/api/v1/empleados/buscar-legajo/'+encodeURIComponent(legajo));
     if(!r.empleado){ el.innerHTML='<div style="color:var(--red-text);font-size:13px">Legajo no encontrado.</div>'; return; }
-    if(r.estadoActual!=='INGRESO' && r.estadoActual!=='REGRESO'){
+    if(!moduloOculto('fichaje') && r.estadoActual!=='INGRESO' && r.estadoActual!=='REGRESO'){
       el.innerHTML='<div style="color:var(--amber-text);font-size:13px">⚠️ Todavía no fichaste tu ingreso. <a href="#" onclick="event.preventDefault();showModule(\'fichaje\')" style="color:var(--accent)">Ir a fichar</a></div>';
       return;
     }
@@ -13035,6 +13045,7 @@ MODULES.config = async function(tabInicial){
       ['plantillasplan','Plantillas de plan'], ['mediospagoservicio','Medios de pago (servicios)'], ['temas','Temas'],
       ['versiones','Versiones'],
     ];
+    if(moduloOculto('fichaje')) tabs=tabs.filter(function(t){ return t[0]!=='fichajes'; });
     main.innerHTML=pageHeader('Ajustes','','')
       +'<div class="tabs-bar">'+tabs.map(function(t){
         return '<button class="tab-btn'+(t[0]===tabInicial?' active':'')+'" onclick="cfg_tab(this,\''+t[0]+'\')">'+t[1]+'</button>';
@@ -14945,7 +14956,9 @@ async function cfg_modulos(content){
   try {
     var data = await apiGet('/api/v1/auth/modulos-catalogo');
     var catalogo = data.catalogo || [];
+    var ocultables = data.ocultables || [];
     var activos = (currentUser.tenant && currentUser.tenant.modulosActivos) || [];
+    var esAdmin = currentUser.rol==='admin';
     content.innerHTML = '<div style="background:var(--surface);border:1px solid var(--border);border-radius:14px;padding:24px;max-width:600px">'
       +'<div style="font-size:12px;color:var(--text2);margin-bottom:16px">Estos son los módulos disponibles en BIMS ERP. Los que tienen interruptor los podés prender o apagar vos; el resto lo habilita nuestro equipo — contactanos para sumarlos a tu plan.</div>'
       +'<div class="mod-status-list">'
@@ -14965,6 +14978,17 @@ async function cfg_modulos(content){
           +'<span style="font-size:18px">'+m.icon+'</span><span style="flex:1;font-weight:500">'+m.label+'</span>'+badge+'</div>';
       }).join('')
       +'</div>'
+      +(ocultables.length?'<div style="font-weight:600;font-size:13px;margin:22px 0 4px">Incluidos en todos los planes</div>'
+        +'<div style="font-size:12px;color:var(--text2);margin-bottom:6px">Si no los usás, ocultalos del menú. Los datos se conservan.</div>'
+        +ocultables.map(function(m){
+          var visible=!moduloOculto(m.id);
+          return '<div style="display:flex;align-items:center;gap:10px;padding:10px 0;border-bottom:1px solid var(--border)">'
+            +'<span style="font-size:18px">'+m.icon+'</span><span style="flex:1"><span style="font-weight:500">'+m.label+'</span>'
+            +(m.desc?'<div style="font-size:11px;color:var(--text2)">'+m.desc+'</div>':'')+'</span>'
+            +(esAdmin?'<label class="toggle-sw"><input type="checkbox"'+(visible?' checked':'')+' onchange="cfg_modulo_toggle(\''+m.id+'\',this.checked,this)"/><span class="toggle-track"><span class="toggle-thumb"></span></span></label>'
+              :(visible?'<span class="badge b-ok">Visible</span>':'<span class="badge b-gray">Oculto</span>'))
+            +'</div>';
+        }).join(''):'')
       +'<a class="btn btn-primary" style="margin-top:16px;display:inline-block;text-decoration:none" href="'+SOPORTE_WHATSAPP+'" target="_blank" rel="noopener">Solicitar activación de módulos</a>'
       +'</div>';
   } catch(e){ content.innerHTML = '<div class="error-state">Error al cargar módulos.</div>'; }
@@ -14975,13 +14999,15 @@ async function cfg_modulo_toggle(id, activo, input){
   var r=await apiPut('/api/v1/configuracion/modulos/'+id, {activo:activo});
   if(!r.ok){ showToast(r.message||'No se pudo cambiar el módulo','danger'); if(input) input.checked=!activo; return; }
   currentUser.tenant.modulosActivos=r.modulosActivos;
+  if(r.modulosOcultos) currentUser.tenant.modulosOcultos=r.modulosOcultos;
   try{
     var guardado=JSON.parse(localStorage.getItem('nexo_api_user')||'null');
-    if(guardado && guardado.tenant){ guardado.tenant.modulosActivos=r.modulosActivos; localStorage.setItem('nexo_api_user', JSON.stringify(guardado)); }
+    if(guardado && guardado.tenant){ guardado.tenant.modulosActivos=r.modulosActivos; if(r.modulosOcultos) guardado.tenant.modulosOcultos=r.modulosOcultos; localStorage.setItem('nexo_api_user', JSON.stringify(guardado)); }
   }catch(e){}
   renderSidebarNav();
   if(typeof updateMobNav==='function') updateMobNav();
-  showToast(activo?'✓ '+moduleLabel(id)+' activado — ya está en el menú':moduleLabel(id)+' desactivado (los datos se conservan)', activo?'ok':'warn');
+  if(r.modulosOcultos) showToast(activo?'✓ '+moduleLabel(id)+' visible en el menú':moduleLabel(id)+' oculto (los datos se conservan)', activo?'ok':'warn');
+  else showToast(activo?'✓ '+moduleLabel(id)+' activado — ya está en el menú':moduleLabel(id)+' desactivado (los datos se conservan)', activo?'ok':'warn');
 }
 
 // ── Razones sociales: un tenant puede facturar bajo más de un CUIT/punto de venta ──

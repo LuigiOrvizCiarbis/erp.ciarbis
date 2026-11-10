@@ -58,10 +58,15 @@ model Tenant {
 
   // Contadores para numeración correlativa legible por tenant (Categoria/Proveedor/Producto.numero) —
   // incrementados dentro de la misma transacción de alta, no se exponen directamente en la UI.
-  seqCategorias  Int @default(0)
-  seqProveedores Int @default(0)
-  seqProductos   Int @default(0)
-  seqTaller      Int @default(0) // OrdenTaller.numero (módulo Taller, V2.102.0)
+  seqCategorias  Int      @default(0)
+  seqProveedores Int      @default(0)
+  seqProductos   Int      @default(0)
+  seqTaller      Int      @default(0) // OrdenTaller.numero (módulo Taller, V2.102.0)
+  seqOT          Int      @default(0) // OrdenTrabajo.nro (módulo Producción, V2.107.0)
+  // Módulos "base" (siempre incluidos) que el admin eligió ocultar desde Ajustes > Módulos —
+  // hoy fichaje y auditoria (V2.107.0). Lista de ocultos y no de visibles: así ninguna empresa
+  // existente cambia sin que alguien lo decida. Ver OCULTABLE_MODULES en src/lib/modulos.js.
+  modulosOcultos String[] @default([])
 
   // Relaciones
   users           User[]
@@ -385,14 +390,14 @@ model Producto {
   proveedorId String? // proveedor preferido/habitual (informativo, no ata las OC)
   proveedor   Proveedor? @relation(fields: [proveedorId], references: [id])
 
-  sku          String
-  codigoBarras String? // EAN/UPC para lectura con lector USB (distinto del SKU interno)
-  nombre       String
+  sku              String
+  codigoBarras     String? // EAN/UPC para lectura con lector USB (distinto del SKU interno)
+  nombre           String
   descripcionCorta String? // teaser/resumen para tarjeta de producto en e-commerce
-  descripcion  String? // descripción larga — detalle del producto en e-commerce
-  um           String    @default("unidad") // unidad, kg, litro, metro, caja, etc.
-  ventaPorPeso Boolean   @default(false) // si true, el PoS pide gramos en vez de sumar 1 unidad
-  vencimiento  DateTime? // vencimiento "típico" del producto, separado del fechaVenc por lote
+  descripcion      String? // descripción larga — detalle del producto en e-commerce
+  um               String    @default("unidad") // unidad, kg, litro, metro, caja, etc.
+  ventaPorPeso     Boolean   @default(false) // si true, el PoS pide gramos en vez de sumar 1 unidad
+  vencimiento      DateTime? // vencimiento "típico" del producto, separado del fechaVenc por lote
 
   // Precios
   precioCosto Decimal @default(0) @db.Decimal(15, 2)
@@ -421,14 +426,14 @@ model Producto {
   actuEn   DateTime @updatedAt
 
   // Relaciones
-  stockSucursales ProductoSucursal[]
-  lotes           Lote[]
-  lineasOV        LineaOrdenVenta[]
-  lineasOC        LineaOrdenCompra[]
-  lineasTicket    LineaTicket[]
-  movimientos     MovimientoStock[]
-  lineasOT        LineaOrdenTrabajo[] // producción
-  variantes       ProductoVariante[]
+  stockSucursales  ProductoSucursal[]
+  lotes            Lote[]
+  lineasOV         LineaOrdenVenta[]
+  lineasOC         LineaOrdenCompra[]
+  lineasTicket     LineaTicket[]
+  movimientos      MovimientoStock[]
+  lineasOT         LineaOrdenTrabajo[] // producción
+  variantes        ProductoVariante[]
   proveedoresCosto ProductoProveedor[] // costo recordado por proveedor, ver modelo ProductoProveedor
 
   @@unique([tenantId, sku])
@@ -684,12 +689,12 @@ model Proveedor {
 // por Orden de Compra como por "Recepción por código" — también se puede cargar/editar a mano
 // desde la ficha del producto, sin necesidad de haber comprado antes.
 model ProductoProveedor {
-  id         String   @id @default(cuid())
-  tenantId   String
-  productoId String
-  producto   Producto @relation(fields: [productoId], references: [id], onDelete: Cascade)
+  id          String    @id @default(cuid())
+  tenantId    String
+  productoId  String
+  producto    Producto  @relation(fields: [productoId], references: [id], onDelete: Cascade)
   proveedorId String
-  proveedor  Proveedor @relation(fields: [proveedorId], references: [id], onDelete: Cascade)
+  proveedor   Proveedor @relation(fields: [proveedorId], references: [id], onDelete: Cascade)
 
   ultimoCosto  Decimal   @db.Decimal(15, 2)
   ultimaCompra DateTime?
@@ -937,7 +942,7 @@ model Ticket {
   // Cuando está presente, medioPago/medioPagoDetalle de arriba quedan null (no hay "un" método
   // único) y esto es la fuente de verdad; el arqueo de caja (POST /caja/:id/cerrar) reparte cada
   // pierna a su propio medio en vez de sumar el total entero a uno solo.
-  pagosSplit Json?
+  pagosSplit       Json?
 
   // Razón social del tenant usada para facturar (si tiene más de una)
   razonSocialId String?
@@ -1277,10 +1282,10 @@ model PagoCliente {
   id       String @id @default(cuid())
   tenantId String
 
-  clienteId String
-  cliente   Cliente  @relation(fields: [clienteId], references: [id])
-  monto     Decimal  @db.Decimal(15, 2)
-  fecha     DateTime @default(now())
+  clienteId  String
+  cliente    Cliente  @relation(fields: [clienteId], references: [id])
+  monto      Decimal  @db.Decimal(15, 2)
+  fecha      DateTime @default(now())
   comentario String?
 
   // Snapshot de cotización — mismo criterio que OrdenCompra/Ticket: se completa solo al crear.
@@ -1617,63 +1622,118 @@ enum TipoMovimiento {
 //  BLOQUE 8 — PRODUCCIÓN (MRP básico)
 // ═══════════════════════════════════════════════════════════
 
-// Fórmula / Bill of Materials — qué ingredientes/componentes
-// se necesitan para fabricar una unidad de un producto.
+// Receta / Bill of Materials (V2.107.0) — qué insumos se necesitan para fabricar `rendimiento`
+// unidades de un producto (o de una variante puntual: textil = una receta por talle si cambia
+// el consumo de tela; null = sirve para todas las variantes). Transversal a propósito: sirve
+// para indumentaria (tela por metro), alimentos (kg/litro con merma) o cosmética (shampoo =
+// detergente + extracto + envase + tapa + etiqueta). Campos opcionales se prenden en
+// Ajustes > Producción (kv produccion.*). activa=false = receta eliminada (soft delete).
 model BOM {
-  id         String   @id @default(cuid())
-  tenantId   String
-  productoId String // producto que se fabrica
-  nombre     String? // nombre de la fórmula
-  version    String   @default("1")
-  activa     Boolean  @default(true)
-  creadoEn   DateTime @default(now())
-  actuEn     DateTime @updatedAt
+  id             String   @id @default(cuid())
+  tenantId       String
+  productoId     String // producto que se fabrica
+  varianteId     String? // receta específica de una variante (null = todas)
+  nombre         String? // nombre de la fórmula (ej. "Shampoo coco 500ml")
+  version        String   @default("1")
+  rendimiento    Decimal  @default(1) @db.Decimal(15, 3) // unidades que produce una tanda de esta receta
+  costoManoObra  Decimal  @default(0) @db.Decimal(15, 2) // por tanda, en pesos
+  costoIndirecto Decimal  @default(0) @db.Decimal(15, 2) // por tanda, en pesos (luz, gas, alquiler prorrateado)
+  etapas         String[] // ids de EtapaProduccion en orden (vacío = todas las activas del tenant)
+  notas          String? // procedimiento / instrucciones
+  activa         Boolean  @default(true)
+  creadoEn       DateTime @default(now())
+  actuEn         DateTime @updatedAt
 
   items          BOMItem[]
   ordenesTrabajo OrdenTrabajo[]
 
-  @@unique([tenantId, productoId, version])
   @@index([tenantId])
+  @@index([tenantId, productoId])
   @@map("boms")
 }
 
 model BOMItem {
-  id       String  @id @default(cuid())
-  bomId    String
-  bom      BOM     @relation(fields: [bomId], references: [id], onDelete: Cascade)
-  insumoId String // producto usado como insumo
-  cantidad Decimal @db.Decimal(15, 4)
-  um       String  @default("unidad")
-  merma    Decimal @default(0) @db.Decimal(5, 2) // % de merma estimada
+  id         String  @id @default(cuid())
+  bomId      String
+  bom        BOM     @relation(fields: [bomId], references: [id], onDelete: Cascade)
+  insumoId   String // producto usado como insumo
+  varianteId String? // variante puntual del insumo (ej. tela color azul)
+  cantidad   Decimal @db.Decimal(15, 4) // por tanda (rendimiento) de la receta
+  um         String  @default("unidad")
+  merma      Decimal @default(0) @db.Decimal(5, 2) // % de merma estimada
+  orden      Int     @default(0)
 
   @@index([bomId])
   @@map("bom_items")
 }
 
+// Etapas / estaciones de producción por empresa (ej. Corte → Costura → Empaque). Son las
+// columnas del tablero de Producción. activa=false = borrada (las OT viejas guardan el nombre).
+model EtapaProduccion {
+  id       String   @id @default(cuid())
+  tenantId String
+  nombre   String
+  color    String   @default("#1E40FF")
+  orden    Int      @default(0)
+  activa   Boolean  @default(true)
+  creadoEn DateTime @default(now())
+
+  @@index([tenantId])
+  @@map("etapas_produccion")
+}
+
+// Orden de trabajo. Flujo: PLANIFICADA → (iniciar: salen los insumos) EN_PROCESO ⇄ PAUSADA →
+// (completar: entra lo producido, se calcula el costo real) COMPLETADA. CANCELADA puede
+// devolver los insumos si ya habían salido. Puede tener varias salidas (curva de talles).
 model OrdenTrabajo {
   id       String @id @default(cuid())
   tenantId String
-  nro      Int
+  nro      Int // correlativo por tenant (Tenant.seqOT)
   bomId    String
   bom      BOM    @relation(fields: [bomId], references: [id])
 
-  cantPlanif Decimal @db.Decimal(15, 3)
+  productoId String? // producto que se fabrica (denormalizado de la receta)
+  sucursalId String? // de dónde salen los insumos y adónde entra lo producido
+
+  cantPlanif Decimal @db.Decimal(15, 3) // suma de las salidas
   cantProd   Decimal @default(0) @db.Decimal(15, 3)
 
   fechaInicio DateTime?
   fechaFin    DateTime?
   fechaFinEst DateTime?
 
-  estado        EstadoOT @default(PLANIFICADA)
-  observaciones String?
+  estado            EstadoOT @default(PLANIFICADA)
+  etapaId           String? // etapa actual en el tablero (null = sin etapa / "Por iniciar")
+  prioridad         String   @default("NORMAL") // BAJA | NORMAL | ALTA | URGENTE
+  responsableId     String?
+  responsableNombre String?
+  observaciones     String?
 
-  creadoEn DateTime @default(now())
-  actuEn   DateTime @updatedAt
+  // Lote de lo producido (si Ajustes > Producción > Lotes está prendido)
+  loteNro   String?
+  fechaVenc DateTime?
 
-  lineas LineaOrdenTrabajo[]
+  // Costos reales (pesos) calculados al completar
+  costoInsumos       Decimal @default(0) @db.Decimal(15, 2)
+  costoManoObra      Decimal @default(0) @db.Decimal(15, 2)
+  costoIndirecto     Decimal @default(0) @db.Decimal(15, 2)
+  costoTotal         Decimal @default(0) @db.Decimal(15, 2)
+  costoUnitario      Decimal @default(0) @db.Decimal(15, 4)
+  insumosDescontados Boolean @default(false) // true desde que se inició (los insumos ya salieron)
+
+  creadoPorId     String?
+  creadoPorNombre String?
+  activo          Boolean  @default(true) // false = eliminada
+  creadoEn        DateTime @default(now())
+  actuEn          DateTime @updatedAt
+
+  lineas  LineaOrdenTrabajo[]
+  salidas OrdenTrabajoSalida[]
+  etapas  OrdenTrabajoEtapa[]
 
   @@unique([tenantId, nro])
   @@index([tenantId])
+  @@index([tenantId, estado])
   @@map("ordenes_trabajo")
 }
 
@@ -1685,18 +1745,55 @@ enum EstadoOT {
   CANCELADA
 }
 
+// Insumo de una OT: cantPlanif ya incluye la merma; cantConsumida = lo que salió del stock.
 model LineaOrdenTrabajo {
   id         String       @id @default(cuid())
   ordenId    String
   orden      OrdenTrabajo @relation(fields: [ordenId], references: [id], onDelete: Cascade)
   productoId String
   producto   Producto     @relation(fields: [productoId], references: [id])
+  varianteId String?
+  um         String       @default("unidad")
 
   cantPlanif    Decimal @db.Decimal(15, 3)
   cantConsumida Decimal @default(0) @db.Decimal(15, 3)
+  costoUnit     Decimal @default(0) @db.Decimal(15, 4) // pesos, snapshot al iniciar
 
   @@index([ordenId])
   @@map("lineas_orden_trabajo")
+}
+
+// Qué produce la OT (una fila por producto/variante — ej. remera S 10, M 20, L 15).
+model OrdenTrabajoSalida {
+  id         String       @id @default(cuid())
+  ordenId    String
+  orden      OrdenTrabajo @relation(fields: [ordenId], references: [id], onDelete: Cascade)
+  productoId String
+  varianteId String?
+  cantPlanif Decimal      @db.Decimal(15, 3)
+  cantProd   Decimal      @default(0) @db.Decimal(15, 3)
+
+  @@index([ordenId])
+  @@map("ordenes_trabajo_salidas")
+}
+
+// Recorrido de una OT por las etapas (snapshot del nombre: si se borra la etapa, la OT conserva su historia).
+model OrdenTrabajoEtapa {
+  id                String       @id @default(cuid())
+  ordenId           String
+  orden             OrdenTrabajo @relation(fields: [ordenId], references: [id], onDelete: Cascade)
+  etapaId           String?
+  nombre            String
+  posicion          Int          @default(0)
+  estado            String       @default("PENDIENTE") // PENDIENTE | EN_CURSO | HECHA
+  responsableId     String?
+  responsableNombre String?
+  inicio            DateTime?
+  fin               DateTime?
+  nota              String?
+
+  @@index([ordenId])
+  @@map("ordenes_trabajo_etapas")
 }
 
 // ═══════════════════════════════════════════════════════════
@@ -2106,11 +2203,11 @@ model OrdenTaller {
   tipo     String // ARMADO | REPARACION | GARANTIA
   estado   String @default("INGRESADO")
 
-  clienteId       String?
-  clienteNombre   String
-  clienteTel      String?
-  clienteEmail    String?
-  clienteDni      String?
+  clienteId     String?
+  clienteNombre String
+  clienteTel    String?
+  clienteEmail  String?
+  clienteDni    String?
 
   equipoTipo   String? // Celular, Notebook, PC...
   marca        String?
@@ -2137,11 +2234,11 @@ model OrdenTaller {
   aprobadoEn         DateTime?
   informe            String? // informe técnico / trabajo realizado
 
-  sena        Decimal?  @db.Decimal(15, 2) // adelanto al ingresar
-  total       Decimal?  @db.Decimal(15, 2) // lo que se cobró al entregar (incluye la seña)
-  medioPago   String?
+  sena         Decimal?  @db.Decimal(15, 2) // adelanto al ingresar
+  total        Decimal?  @db.Decimal(15, 2) // lo que se cobró al entregar (incluye la seña)
+  medioPago    String?
   garantiaDias Int?
-  entregadoEn DateTime?
+  entregadoEn  DateTime?
 
   usuarioId String? // quién tomó el ingreso
   activo    Boolean  @default(true)

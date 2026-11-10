@@ -8,7 +8,7 @@ import { z } from 'zod'
 import { prisma } from '../../lib/prisma.js'
 import { invalidarCacheAuth } from '../../lib/authCache.js'
 import { randomBytes } from 'crypto'
-import { MODULE_CATALOG, RUBRO_MODULE_DEFAULTS, defaultModulosForRubro, sanitizeModulos } from '../../lib/modulos.js'
+import { MODULE_CATALOG, RUBRO_MODULE_DEFAULTS, defaultModulosForRubro, sanitizeModulos, OCULTABLE_MODULES } from '../../lib/modulos.js'
 import { PERMS_SISTEMA, ROL_LABELS, permisosDesdeModulos } from '../../lib/permisos.js'
 import { sendEmail, emailConfirmacionCuenta, emailRecuperoPassword } from '../../lib/email.js'
 
@@ -77,6 +77,7 @@ export default async function authRoutes(fastify) {
   // y dashboard.html/superadmin para pintar los mismos catálogos.
   fastify.get('/auth/modulos-catalogo', async () => ({
     catalogo: MODULE_CATALOG,
+    ocultables: OCULTABLE_MODULES,
     rubroDefaults: RUBRO_MODULE_DEFAULTS,
   }))
 
@@ -96,7 +97,7 @@ export default async function authRoutes(fastify) {
     const user = await prisma.user.findFirst({
       where: { email: email.toLowerCase() },
       include: {
-        tenant: { select: { id: true, nombre: true, slug: true, activo: true, plan: true, trialVence: true, facAutoEnabled: true, ptoVta: true, rubro: true, modulosActivos: true, logo: true } },
+        tenant: { select: { id: true, nombre: true, slug: true, activo: true, plan: true, trialVence: true, facAutoEnabled: true, ptoVta: true, rubro: true, modulosActivos: true, modulosOcultos: true, logo: true } },
         rolCustom: { select: { id: true, nombre: true, permisos: true } },
       },
     })
@@ -159,6 +160,7 @@ export default async function authRoutes(fastify) {
           ptoVta: user.tenant.ptoVta,
           rubro: user.tenant.rubro,
           modulosActivos: user.tenant.modulosActivos,
+          modulosOcultos: user.tenant.modulosOcultos || [],
           logo: user.tenant.logo,
         },
       },
@@ -191,7 +193,7 @@ export default async function authRoutes(fastify) {
           select: {
             id: true, nombre: true, slug: true, plan: true,
             facAutoEnabled: true, ptoVta: true, condIVA: true,
-            rubro: true, modulosActivos: true, logo: true,
+            rubro: true, modulosActivos: true, modulosOcultos: true, logo: true,
           },
         },
       },
@@ -295,7 +297,7 @@ export default async function authRoutes(fastify) {
         tenantId: tenant.id, sucursalId: user.sucursalId,
         tenant: {
           id: tenant.id, nombre: tenant.nombre, slug: tenant.slug, plan: tenant.plan,
-          rubro: tenant.rubro, modulosActivos: tenant.modulosActivos,
+          rubro: tenant.rubro, modulosActivos: tenant.modulosActivos, modulosOcultos: [],
         },
       },
     })

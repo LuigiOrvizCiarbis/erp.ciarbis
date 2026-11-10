@@ -11,7 +11,7 @@ export const MODULE_CATALOG = [
   { id: 'inventario', label: 'Inventario', icon: '📦' },
   { id: 'ventas', label: 'Ventas', icon: '🧾' },
   { id: 'compras', label: 'Compras', icon: '🛒' },
-  { id: 'produccion', label: 'Producción', icon: '🏭' },
+  { id: 'produccion', label: 'Producción', icon: '🏭', selfService: true, desc: 'Recetas, órdenes de trabajo, etapas y planificación de insumos' },
   { id: 'facturacion', label: 'Facturación', icon: '💳' },
   // selfService: el admin del tenant lo prende/apaga solo desde Ajustes > Módulos (además del
   // registro y del superadmin) — ver PUT /configuracion/modulos/:id.
@@ -19,6 +19,15 @@ export const MODULE_CATALOG = [
   { id: 'logistica', label: 'Logística', icon: '🚚', comingSoon: true },
   { id: 'ecommerce', label: 'E-Commerce', icon: '💻', comingSoon: true },
 ]
+
+// Módulos incluidos en todos los planes que el admin puede OCULTAR (no se cobran, solo se
+// sacan del menú para quien no los usa). Se guardan en Tenant.modulosOcultos.
+// Auditoría oculta sigue registrando: si se vuelve a mostrar, el historial está completo.
+export const OCULTABLE_MODULES = [
+  { id: 'fichaje', label: 'Fichaje', icon: '🕐', desc: 'Entrada, salida y descansos del personal. Oculto, la caja se abre sin exigir fichaje.' },
+  { id: 'auditoria', label: 'Auditoría', icon: '🔍', desc: 'Historial de cambios sensibles (precios, stock, ventas). Oculto, el registro se sigue guardando.' },
+]
+export const OCULTABLE_IDS = OCULTABLE_MODULES.map(m => m.id)
 
 export const MODULE_IDS = MODULE_CATALOG.map(m => m.id)
 export const GATEABLE_NOW_IDS = MODULE_CATALOG.filter(m => !m.comingSoon).map(m => m.id)

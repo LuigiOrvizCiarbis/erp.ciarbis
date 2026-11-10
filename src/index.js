@@ -32,6 +32,7 @@ import contableRoutes from './routes/v1/contable.js'
 import cotizacionDolarRoutes from './routes/v1/cotizacionDolar.js'
 import soporteRoutes from './routes/v1/soporte.js'
 import tallerRoutes from './routes/v1/taller.js'
+import produccionRoutes from './routes/v1/produccion.js'
 
 async function start() {
   const isProd = process.env.NODE_ENV === 'production'
@@ -100,6 +101,7 @@ async function start() {
   await app.register(cotizacionDolarRoutes, v1)
   await app.register(soporteRoutes, v1)
   await app.register(tallerRoutes, v1)
+  await app.register(produccionRoutes, v1)
 
   app.get('/health', async () => ({
     status: 'ok',
