@@ -8211,68 +8211,667 @@ async function oc_ver(id){
 }
 
 /* ═══════════════════════════════════════
-   PRODUCCIÓN
+   PRODUCCIÓN (V2.107.0) — recetas, órdenes de trabajo, etapas y planificación de insumos.
+   Transversal: indumentaria (curva de talles), alimentos (kg/litro, merma, lote+vencimiento),
+   cosmética (shampoo = detergente + extracto + envase + tapa + etiqueta). Lo opcional se
+   prende/apaga en "Ajustes de producción" (GET/PUT /produccion/config). Insumos salen del
+   stock al INICIAR la orden; lo producido entra al COMPLETARLA. Backend: src/routes/v1/produccion.js.
 ═══════════════════════════════════════ */
+var PROD_PRIORIDADES=[{id:'BAJA',label:'Baja',color:'#94A3B8'},{id:'NORMAL',label:'Normal',color:'#64748B'},{id:'ALTA',label:'Alta',color:'#F59E0B'},{id:'URGENTE',label:'Urgente',color:'#EF4444'}];
+var PROD_ESTADOS={PLANIFICADA:{label:'Planificada',cls:'b-gray'},EN_PROCESO:{label:'En proceso',cls:'b-info'},PAUSADA:{label:'Pausada',cls:'b-warn'},COMPLETADA:{label:'Completada',cls:'b-ok'},CANCELADA:{label:'Cancelada',cls:'b-red'}};
+var PROD_CFG_LABELS=[
+  {k:'etapas', l:'Etapas / estaciones', d:'Tablero con las etapas del proceso (ej. Corte → Costura → Empaque).'},
+  {k:'responsable', l:'Responsable', d:'Quién está a cargo de cada orden y de cada etapa.'},
+  {k:'merma', l:'Merma', d:'% de desperdicio por insumo (se suma a lo que sale del stock).'},
+  {k:'costos', l:'Mano de obra y gastos', d:'Costo de mano de obra e indirectos en la receta, para el costo real.'},
+  {k:'variantes', l:'Producir por variante', d:'Curva de talles/colores en una misma orden.'},
+  {k:'fechaEst', l:'Fecha estimada', d:'Fecha en la que la orden debería estar terminada (avisa demoras).'},
+  {k:'prioridad', l:'Prioridad', d:'Baja / Normal / Alta / Urgente.'},
+  {k:'lotes', l:'Lote y vencimiento', d:'Nº de lote y fecha de vencimiento de lo producido (alimentos, cosmética).'},
+  {k:'permitirSinStock', l:'Iniciar sin stock', d:'Deja iniciar aunque falten insumos (el stock queda en negativo).'},
+  {k:'actualizarCosto', l:'Actualizar costo del producto', d:'Al completar, el costo del producto pasa a ser el costo real de la orden.'},
+];
+
+function prod_num(n){ return Number(n||0).toLocaleString('es-AR',{maximumFractionDigits:3}); }
+function prod_nro(n){ return 'OT-'+String(n||0).padStart(4,'0'); }
+function prod_estado_badge(e){ var x=PROD_ESTADOS[e]||{label:e,cls:'b-gray'}; return '<span class="badge '+x.cls+'">'+x.label+'</span>'; }
+function prod_prioridad(id){ return PROD_PRIORIDADES.find(function(p){return p.id===id;})||PROD_PRIORIDADES[1]; }
+function prod_fecha(s){ return s ? String(s).slice(0,10).split('-').reverse().join('/') : ''; }
+function prod_demorada(o){ return o.fechaFinEst && ['PLANIFICADA','EN_PROCESO','PAUSADA'].indexOf(o.estado)!==-1 && new Date(o.fechaFinEst) < new Date(new Date().toDateString()); }
+function prod_salidas_txt(o){
+  var s=o.salidas||[];
+  if(s.length>1 || (s[0]&&s[0].varianteTxt)) return s.map(function(x){ return (x.varianteTxt||'—')+' ×'+prod_num(x.cantPlanif); }).join(' · ');
+  return '';
+}
+function prod_input(id, attrs, val){ return '<input id="'+id+'" '+(attrs||'')+' value="'+imp_esc(val==null?'':val)+'" style="width:100%;background:var(--input-bg);border:1px solid var(--border);border-radius:8px;color:var(--text);padding:8px;font-size:13px"/>'; }
+function prod_select_style(){ return 'width:100%;background:var(--input-bg);border:1px solid var(--border);border-radius:8px;color:var(--text);padding:8px;font-size:13px'; }
+async function prod_err(r, fallback){
+  if(r && (r.error || r.statusCode>=400)){ showToast(r.message||fallback||'No se pudo guardar','danger'); return true; }
+  return false;
+}
+
 MODULES.produccion = async function(){
   var main=document.getElementById('main');
+  var guardado=null; try{ guardado=JSON.parse(localStorage.getItem('nexo_prod_vista')||'null'); }catch(e){}
+  window._prod=window._prod||{tab:(guardado&&guardado.tab)||'tablero', q:''};
   main.innerHTML='<div class="loading-state"><div class="loading-icon">'+ICON_SPIN+'</div>Cargando producción...</div>';
-  try {
-    var [ots,boms]=await Promise.all([
-      apiList('/api/v1/ordenes-trabajo?limit=100').catch(function(){return [];}),
-      apiList('/api/v1/bom?limit=100').catch(function(){return [];})
-    ]);
-    main.innerHTML=pageHeader('Producción','',
-      '<button class="btn btn-primary" onclick="modal_ot_nuevo()">+ Nueva OT</button>')
-      +'<div class="kpi-row">'
-      +kpi('OT activas',''+ots.filter(function(o){return o.estado==='EN_PROCESO';}).length,'','info')
-      +kpi('Completadas',''+ots.filter(function(o){return o.estado==='COMPLETADA';}).length,'','up')
-      +kpi('Pendientes',''+ots.filter(function(o){return o.estado==='PENDIENTE';}).length,'','warn')
-      +kpi('BOMs',''+boms.length,'','')
-      +'</div>'
-      +'<div class="tabs-bar"><button class="tab-btn active" onclick="prod_tab(this,\'ots\')">Órdenes de trabajo</button>'
-      +'<button class="tab-btn" onclick="prod_tab(this,\'bom\')">BOM / Recetas</button></div>'
-      +'<div id="prod-content">'+prod_table_ots(ots)+'</div>';
-    window._prod_ots=ots; window._prod_boms=boms;
-  } catch(e){document.getElementById('main').innerHTML='<div class="error-state">Error: '+e.message+'</div>';}
+  try{
+    var [cfg, etapas]=await Promise.all([apiGet('/api/v1/produccion/config'), apiList('/api/v1/produccion/etapas')]);
+    window._prod.cfg=cfg; window._prod.etapas=etapas;
+  }catch(e){
+    if(e.message==='403') main.innerHTML='<div class="perm-denied"><div class="icon">🔒</div><h3>Producción no está activa</h3><p>Un administrador la puede activar desde Ajustes → Módulos.</p></div>';
+    else main.innerHTML='<div class="error-state">Error al cargar producción: '+e.message+'</div>';
+    return;
+  }
+  main.innerHTML=pageHeader('Producción','Recetas, órdenes de trabajo y control de insumos — desde la materia prima hasta el producto terminado.',
+      '<div style="display:flex;gap:8px;flex-wrap:wrap">'
+      +(currentUser.rol==='admin'?'<button class="btn btn-ghost" onclick="prod_ajustes_modal()" title="Ajustes de producción">'+ICON_SLIDERS+' Ajustes</button>':'')
+      +'<button class="btn btn-ghost" onclick="prod_receta_modal()">+ Receta</button>'
+      +'<button class="btn btn-primary" onclick="prod_ot_modal()">+ Nueva orden</button></div>')
+    +'<div class="tabs-bar" id="prod-tabs"></div>'
+    +'<div id="prod-kpis" class="kpi-row"></div>'
+    +'<div id="prod-content"><div class="loading-state"><div class="loading-icon">'+ICON_SPIN+'</div>Cargando...</div></div>';
+  prod_tabs_render();
+  prod_cargar();
 };
-function prod_tab(btn,tab){
-  document.querySelectorAll('.tab-btn').forEach(function(b){b.classList.remove('active');});
-  btn.classList.add('active');
-  document.getElementById('prod-content').innerHTML=tab==='ots'?prod_table_ots(window._prod_ots||[]):prod_table_boms(window._prod_boms||[]);
+function prod_tabs_render(){
+  var tabs=[['tablero','Tablero'],['lista','Órdenes'],['recetas','Recetas'],['planificacion','Planificación']];
+  document.getElementById('prod-tabs').innerHTML=tabs.map(function(t){
+    return '<button class="tab-btn'+(window._prod.tab===t[0]?' active':'')+'" onclick="prod_tab(\''+t[0]+'\')">'+t[1]+'</button>';
+  }).join('');
 }
-function prod_table_ots(ots){
-  return tableWrap(['#','Producto','Cant.','Fecha inicio','Estado'],
-    ots.length?ots.map(function(o){
-      return '<tr><td class="mono" style="font-size:11px">'+o.id?.slice(0,8)+'</td>'
-        +'<td style="font-weight:600">'+(o.productoNombre||o.producto?.nombre||'—')+'</td>'
-        +'<td>'+o.cantidadPlanificada+'</td>'
-        +'<td>'+fmtDate(o.fechaInicio||o.creadoEn)+'</td>'
-        +'<td>'+statusBadge(o.estado||'—')+'</td></tr>';
-    }).join(''):emptyRow(5,'Sin órdenes de trabajo.'));
+function prod_tab(t){
+  window._prod.tab=t; try{ localStorage.setItem('nexo_prod_vista', JSON.stringify({tab:t})); }catch(e){}
+  prod_tabs_render(); prod_cargar();
 }
-function prod_table_boms(boms){
-  return tableWrap(['Producto terminado','Componentes','Costo estimado'],
-    boms.length?boms.map(function(b){
-      return '<tr><td style="font-weight:600">'+(b.productoNombre||b.producto?.nombre||'—')+'</td>'
-        +'<td>'+(b.items?.length||0)+' componentes</td>'
-        +'<td>'+fmtPeso(b.costoTotal||0)+'</td></tr>';
-    }).join(''):emptyRow(3,'Sin BOMs definidas. Creá la primera en Configuración.'));
+async function prod_cargar(){
+  var P=window._prod, cont=document.getElementById('prod-content');
+  if(!cont) return;
+  apiGet('/api/v1/produccion/kpis').then(function(k){
+    var el=document.getElementById('prod-kpis'); if(!el) return;
+    el.innerHTML=kpi('En proceso', ''+(k.enProceso+k.pausadas), k.pausadas?k.pausadas+' pausada(s)':'órdenes en marcha', 'info')
+      +kpi('Por iniciar', ''+k.planificadas, 'órdenes planificadas', '')
+      +kpi('Demoradas', ''+k.demoradas, 'pasó la fecha estimada', k.demoradas?'danger':'')
+      +kpi('Producido este mes', prod_num(k.unidadesMes)+' u', k.completadasMes+' orden(es) · '+fmtPeso(k.costoMes), 'up');
+  }).catch(function(){});
+  try{
+    if(P.tab==='recetas') return prod_recetas_render(cont);
+    if(P.tab==='planificacion') return prod_planif_render(cont);
+    var r=await apiGet('/api/v1/produccion/ordenes'+(P.tab==='tablero'?'?tablero=1&limit=500':'?limit=200'+(P.estado?'&estado='+P.estado:'')+(P.q?'&q='+encodeURIComponent(P.q):'')));
+    P.items=r.data||[];
+    cont.innerHTML = P.tab==='tablero' ? prod_tablero_html(P.items) : prod_lista_html(P.items, r.total);
+  }catch(e){ cont.innerHTML='<div class="error-state">Error: '+e.message+'</div>'; }
 }
-function modal_ot_nuevo(){
-  showToast('Las órdenes de trabajo requieren configurar BOMs primero. Próximamente.','warn');
-  return;
-  openModal('<h3 class="modal-title">Nueva orden de trabajo</h3>'
+
+/* ── Tablero ── columnas: Por iniciar | etapas… | Terminadas */
+function prod_columnas(){
+  var cols=[{id:'__plan', label:'Por iniciar', color:'#64748B'}];
+  var et=(window._prod.cfg.etapas && window._prod.etapas.length) ? window._prod.etapas : [];
+  if(et.length) et.forEach(function(e){ cols.push({id:e.id, label:e.nombre, color:e.color||'#1E40FF', etapa:true}); });
+  else cols.push({id:'__proc', label:'En proceso', color:'#1E40FF'});
+  cols.push({id:'__fin', label:'Terminadas', color:'#10B981'});
+  return cols;
+}
+function prod_columna_de(o, cols){
+  if(o.estado==='PLANIFICADA') return '__plan';
+  if(o.estado==='COMPLETADA') return '__fin';
+  if(o.etapaId && cols.some(function(c){return c.id===o.etapaId;})) return o.etapaId;
+  var primera=cols.find(function(c){return c.etapa;});
+  return primera ? primera.id : '__proc';
+}
+function prod_card_html(o){
+  var pr=prod_prioridad(o.prioridad), cfg=window._prod.cfg;
+  var curva=prod_salidas_txt(o);
+  return '<div draggable="true" ondragstart="event.dataTransfer.setData(\'text/plain\',\''+o.id+'\')" onclick="prod_ficha(\''+o.id+'\')" style="background:var(--surface2);border-radius:10px;padding:10px;margin-bottom:8px;cursor:grab;border:1px solid var(--border)'+(cfg.prioridad&&o.prioridad!=='NORMAL'?';border-left:3px solid '+pr.color:'')+'">'
+    +'<div style="display:flex;justify-content:space-between;gap:6px;align-items:center;margin-bottom:4px">'
+    +'<span style="font-family:var(--mono);font-size:12px;font-weight:700;color:var(--accent-text)">'+prod_nro(o.nro)+'</span>'
+    +(o.estado==='PAUSADA'?'<span class="badge b-warn" style="font-size:10px">Pausada</span>':(prod_demorada(o)?'<span class="badge b-red" style="font-size:10px">Demorada</span>':(o.fechaFinEst&&o.estado!=='COMPLETADA'?'<span style="font-size:11px;color:var(--text2)">'+prod_fecha(o.fechaFinEst)+'</span>':'')))+'</div>'
+    +'<div style="font-weight:600;font-size:13px;line-height:1.3">'+imp_esc(o.productoNombre)+'</div>'
+    +'<div style="color:var(--text2);font-size:12px;margin-top:2px">'+prod_num(o.estado==='COMPLETADA'?o.cantProd:o.cantPlanif)+' '+imp_esc(o.productoUm||'u')+(o.loteNro?' · Lote '+imp_esc(o.loteNro):'')+'</div>'
+    +(curva?'<div style="color:var(--text2);font-size:11px;margin-top:2px">'+imp_esc(curva)+'</div>':'')
+    +(o.responsableNombre?'<div style="color:var(--text2);font-size:11px;margin-top:6px">👤 '+imp_esc(o.responsableNombre.split(' ')[0])+'</div>':'')
+    +'</div>';
+}
+function prod_tablero_html(items){
+  if(!items.length){
+    return '<div style="text-align:center;padding:48px 16px;color:var(--text2)"><div style="font-size:34px;margin-bottom:8px">🏭</div>'
+      +'<div style="font-weight:600;color:var(--text);margin-bottom:4px">Todavía no hay órdenes de trabajo</div>'
+      +'<div style="font-size:13px;margin-bottom:16px">1) Cargá la receta de lo que fabricás (qué insumos lleva). 2) Creá una orden con la cantidad a producir.</div>'
+      +'<div style="display:flex;gap:8px;justify-content:center;flex-wrap:wrap"><button class="btn btn-ghost" onclick="prod_receta_modal()">+ Receta</button><button class="btn btn-primary" onclick="prod_ot_modal()">+ Nueva orden</button></div></div>';
+  }
+  var cols=prod_columnas();
+  return '<div style="display:grid;grid-template-columns:repeat('+cols.length+',minmax(210px,1fr));gap:10px;overflow-x:auto;padding-bottom:8px">'
+    +cols.map(function(c){
+      var col=items.filter(function(o){return prod_columna_de(o, cols)===c.id;});
+      return '<div class="chart-card" style="padding:10px;min-width:210px;border-top:3px solid '+c.color+'" ondragover="event.preventDefault()" ondrop="prod_drop(event,\''+c.id+'\')">'
+        +'<div style="font-weight:600;font-size:13px;margin-bottom:8px;display:flex;justify-content:space-between"><span>'+imp_esc(c.label)+'</span><span style="color:var(--text2)">'+col.length+'</span></div>'
+        +(col.length?col.map(prod_card_html).join(''):'<div style="color:var(--text3);font-size:12px;padding:6px 0">—</div>')
+        +(c.id==='__fin'?'<div style="font-size:10px;color:var(--text3);margin-top:4px">Últimos 15 días · el resto está en Órdenes</div>':'')
+        +'</div>';
+    }).join('')+'</div>'
+    +'<div style="font-size:11px;color:var(--text3);margin-top:4px">Arrastrá una tarjeta: de "Por iniciar" a una etapa la inicia (salen los insumos); a "Terminadas" la completa.</div>';
+}
+async function prod_drop(ev, colId){
+  ev.preventDefault();
+  var id=ev.dataTransfer.getData('text/plain'); if(!id) return;
+  var o=(window._prod.items||[]).find(function(x){return x.id===id;}); if(!o) return;
+  var cols=prod_columnas();
+  if(prod_columna_de(o, cols)===colId) return;
+  if(o.estado==='COMPLETADA'){ showToast('La orden ya está completada','warn'); return; }
+  if(colId==='__plan'){ showToast('Una orden iniciada no vuelve a "Por iniciar" (sus insumos ya salieron). Si hace falta, cancelala.','warn'); return; }
+  if(colId==='__fin'){ prod_completar_modal(id); return; }
+  if(o.estado==='PLANIFICADA'){ await prod_iniciar(id, colId.indexOf('__')===0?null:colId); return; }
+  if(colId==='__proc') return;
+  var r=await apiPatch('/api/v1/produccion/ordenes/'+id+'/etapa',{etapaId:colId});
+  if(await prod_err(r,'No se pudo mover')) return;
+  showToast('Movida a "'+((cols.find(function(c){return c.id===colId;})||{}).label||'')+'"','ok');
+  prod_cargar();
+}
+
+/* ── Lista ── */
+function prod_lista_html(items, total){
+  var P=window._prod, cfg=P.cfg;
+  var filtros='<div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:10px">'
+    +'<input id="prod-q" placeholder="Buscar nº de orden, producto, lote, responsable..." value="'+imp_esc(P.q||'')+'" onkeydown="if(event.key===\'Enter\'){window._prod.q=this.value;prod_cargar();}" style="flex:1;min-width:220px;max-width:420px;'+prod_select_style()+'"/>'
+    +'<select onchange="window._prod.estado=this.value;prod_cargar()" style="'+COMPRAS_SEL_STYLE+'"><option value="">Todos los estados</option>'
+    +Object.keys(PROD_ESTADOS).map(function(k){return '<option value="'+k+'"'+(P.estado===k?' selected':'')+'>'+PROD_ESTADOS[k].label+'</option>';}).join('')+'</select></div>';
+  var cols=['Nº','Producto','Cantidad','Estado'].concat(cfg.etapas?['Etapa']:[]).concat(cfg.responsable?['Responsable']:[]).concat(cfg.fechaEst?['Fecha est.']:[]).concat(['Costo']);
+  var etNom={}; (P.etapas||[]).forEach(function(e){etNom[e.id]=e.nombre;});
+  var rows=items.map(function(o){
+    return '<tr style="cursor:pointer" onclick="prod_ficha(\''+o.id+'\')">'
+      +'<td style="font-family:var(--mono);font-weight:700">'+prod_nro(o.nro)+'</td>'
+      +'<td>'+imp_esc(o.productoNombre)+(prod_salidas_txt(o)?'<div style="font-size:11px;color:var(--text2)">'+imp_esc(prod_salidas_txt(o))+'</div>':'')+'</td>'
+      +'<td>'+prod_num(o.estado==='COMPLETADA'?o.cantProd:o.cantPlanif)+(o.estado==='COMPLETADA'&&Number(o.cantProd)!==Number(o.cantPlanif)?' <span style="font-size:11px;color:var(--text2)">de '+prod_num(o.cantPlanif)+'</span>':'')+'</td>'
+      +'<td>'+prod_estado_badge(o.estado)+'</td>'
+      +(cfg.etapas?'<td>'+imp_esc(o.etapaId?(etNom[o.etapaId]||'—'):'—')+'</td>':'')
+      +(cfg.responsable?'<td>'+imp_esc(o.responsableNombre||'—')+'</td>':'')
+      +(cfg.fechaEst?'<td'+(prod_demorada(o)?' style="color:var(--red-text);font-weight:600"':'')+'>'+(prod_fecha(o.fechaFinEst)||'—')+'</td>':'')
+      +'<td style="text-align:right">'+(o.estado==='COMPLETADA'?fmtPeso(o.costoTotal):'—')+'</td></tr>';
+  }).join('');
+  return filtros+'<div style="font-size:12px;color:var(--text2);margin-bottom:6px">'+(total||0)+' orden(es)</div>'+tableWrap(cols, rows||emptyRow(cols.length,'No hay órdenes con este filtro.'));
+}
+
+/* ── Buscador de productos reutilizable (autocompletar contra /productos?q=) ── */
+var _prod_busca_t=null;
+function prod_buscador_html(id, ph, valorTxt){
+  return '<div style="position:relative"><input id="'+id+'" placeholder="'+(ph||'Buscar producto por nombre o SKU...')+'" value="'+imp_esc(valorTxt||'')+'" autocomplete="off" oninput="prod_buscar(\''+id+'\')" onfocus="prod_buscar(\''+id+'\')" style="width:100%;background:var(--input-bg);border:1px solid var(--border);border-radius:8px;color:var(--text);padding:8px;font-size:13px"/>'
+    +'<div id="'+id+'-res" style="display:none;position:absolute;z-index:50;left:0;right:0;top:100%;margin-top:2px;background:var(--surface);border:1px solid var(--border);border-radius:8px;max-height:240px;overflow:auto;box-shadow:0 8px 24px rgba(0,0,0,.25)"></div></div>';
+}
+function prod_buscar(id){
+  clearTimeout(_prod_busca_t);
+  _prod_busca_t=setTimeout(async function(){
+    var inp=document.getElementById(id), res=document.getElementById(id+'-res'); if(!inp||!res) return;
+    var q=inp.value.trim();
+    var lista=await apiList('/api/v1/productos?activo=true&limit=15'+(q?'&q='+encodeURIComponent(q):'')).catch(function(){return [];});
+    window._prod_busq=window._prod_busq||{}; window._prod_busq[id]=lista;
+    res.innerHTML=lista.length?lista.map(function(p,i){
+      return '<div onmousedown="event.preventDefault();prod_buscar_elegir(\''+id+'\','+i+')" style="padding:8px 10px;cursor:pointer;border-bottom:1px solid var(--border);font-size:13px" onmouseover="this.style.background=\'var(--surface2)\'" onmouseout="this.style.background=\'\'">'
+        +'<div style="font-weight:600">'+imp_esc(p.nombre)+'</div><div style="font-size:11px;color:var(--text2)">'+imp_esc(p.sku)+' · stock '+prod_num(p.stock)+' '+imp_esc(p.um||'')+' · costo '+fmtPeso(p.precioCosto)+((p.variantes||[]).length?' · '+p.variantes.length+' variantes':'')+'</div></div>';
+    }).join(''):'<div style="padding:10px;font-size:12px;color:var(--text2)">Sin resultados</div>';
+    res.style.display='block';
+    inp.onblur=function(){ setTimeout(function(){ res.style.display='none'; },150); };
+  }, 220);
+}
+function prod_buscar_elegir(id, i){
+  var p=(window._prod_busq[id]||[])[i]; if(!p) return;
+  document.getElementById(id).value=p.nombre;
+  document.getElementById(id+'-res').style.display='none';
+  if(typeof window._prod_busca_cb[id]==='function') window._prod_busca_cb[id](p);
+}
+window._prod_busca_cb={};
+function prod_var_txt(v){ var t=Object.values(v.valores||{}).filter(Boolean).join(' / '); return t||v.sku; }
+
+/* ── Recetas ── */
+async function prod_recetas_render(cont){
+  var recetas=await apiList('/api/v1/produccion/recetas');
+  window._prod.recetas=recetas;
+  var cfg=window._prod.cfg;
+  if(!recetas.length){
+    cont.innerHTML='<div style="text-align:center;padding:48px 16px;color:var(--text2)"><div style="font-size:34px;margin-bottom:8px">📋</div>'
+      +'<div style="font-weight:600;color:var(--text);margin-bottom:4px">Sin recetas todavía</div>'
+      +'<div style="font-size:13px;margin-bottom:16px">Una receta dice qué insumos lleva un producto. Ej: 100 shampoos = 40 L de detergente + 1 L de extracto + 100 envases + 100 tapas + 100 etiquetas.</div>'
+      +'<button class="btn btn-primary" onclick="prod_receta_modal()">+ Nueva receta</button></div>';
+    return;
+  }
+  var cols=['Producto','Receta','Rinde','Insumos','Costo unitario est.',''];
+  cont.innerHTML='<div style="display:flex;justify-content:flex-end;margin-bottom:10px"><button class="btn btn-primary btn-sm" onclick="prod_receta_modal()">+ Nueva receta</button></div>'
+    +tableWrap(cols, recetas.map(function(r){
+      return '<tr><td style="font-weight:600;cursor:pointer" onclick="prod_receta_modal(\''+r.id+'\')">'+imp_esc(r.productoNombre)+(r.varianteTxt?' <span class="badge b-gray" style="font-size:10px">'+imp_esc(r.varianteTxt)+'</span>':'')+'</td>'
+        +'<td>'+imp_esc(r.nombre||'—')+'</td>'
+        +'<td>'+prod_num(r.rendimiento)+' '+imp_esc(r.productoUm||'u')+'</td>'
+        +'<td style="max-width:320px;white-space:normal;font-size:12px;color:var(--text2)">'+r.items.map(function(i){return imp_esc(i.insumoNombre)+(i.varianteTxt?' ('+imp_esc(i.varianteTxt)+')':'');}).join(', ')+'</td>'
+        +'<td style="text-align:right">'+fmtPeso(r.costoUnitario)+'</td>'
+        +'<td style="white-space:nowrap;text-align:right"><button class="btn btn-ghost btn-sm" onclick="prod_ot_modal(\''+r.id+'\')">Producir</button> '
+        +'<button class="btn-icon" title="Editar" onclick="prod_receta_modal(\''+r.id+'\')">'+ICON_EDIT+'</button>'
+        +'<button class="btn-icon" title="Duplicar" onclick="prod_receta_duplicar(\''+r.id+'\')">⧉</button>'
+        +'<button class="btn-icon" title="Eliminar" onclick="prod_receta_eliminar(\''+r.id+'\')">'+ICON_TRASH+'</button></td></tr>';
+    }).join(''));
+}
+async function prod_receta_modal(id){
+  var cfg=window._prod.cfg;
+  var r=id?await apiGet('/api/v1/produccion/recetas/'+id).catch(function(){return null;}):null;
+  window._prod_rec={id:id||null, producto:null, varianteId:r?r.varianteId:null, items:[]};
+  if(r){
+    var prod=await apiGet('/api/v1/productos/'+r.productoId).catch(function(){return null;});
+    window._prod_rec.producto=prod;
+    var ids=r.items.map(function(i){return i.insumoId;});
+    var prods=await Promise.all(ids.map(function(pid){return apiGet('/api/v1/productos/'+pid).catch(function(){return null;});}));
+    window._prod_rec.items=r.items.map(function(i,ix){ return {insumo:prods[ix]||{id:i.insumoId,nombre:i.insumoNombre,um:i.um,precioCosto:i.costoUnit,variantes:[]}, varianteId:i.varianteId, cantidad:+i.cantidad, um:i.um, merma:+i.merma}; });
+  }
+  var et=window._prod.etapas||[];
+  var etSel=r&&r.etapas&&r.etapas.length?r.etapas:et.map(function(e){return e.id;});
+  openModalWide('<h3 class="modal-title">'+(id?'Editar receta':'Nueva receta')+'</h3>'
     +'<div class="form-grid">'
-    +'<div class="form-group"><label>Cantidad a producir</label><input id="ot-cant" type="number" min="1" value="1"/></div>'
-    +'<div class="form-group"><label>Fecha inicio</label><input id="ot-fecha" type="date" value="'+today()+'"/></div>'
-    +'<div class="form-group full"><label>Notas</label><textarea id="ot-notas" rows="2" style="width:100%;background:var(--input-bg);border:1px solid var(--border);border-radius:8px;color:var(--text);padding:8px;font-size:13px;resize:vertical"></textarea></div>'
+    +'<div class="form-group full"><label>Producto que se fabrica *</label>'+prod_buscador_html('prec-prod','Buscar el producto terminado...', r?r.productoNombre:'')+'</div>'
+    +'<div class="form-group" id="prec-var-wrap" style="display:none"><label>Variante</label><select id="prec-var" style="'+prod_select_style()+'"></select></div>'
+    +'<div class="form-group"><label>Nombre de la receta</label>'+prod_input('prec-nombre','placeholder="Ej: Shampoo coco 500ml"', r?r.nombre:'')+'</div>'
+    +'<div class="form-group"><label>Rinde (unidades por tanda) *</label>'+prod_input('prec-rinde','type="number" min="0.001" step="any" oninput="prod_rec_total()"', r?+r.rendimiento:1)+'</div>'
     +'</div>'
-    +'<div class="modal-footer"><button class="btn btn-primary" onclick="ot_guardar()">Crear OT</button><button class="btn btn-ghost" onclick="closeModal()">Cancelar</button></div>');
+    +'<div class="section-mini">Insumos (para una tanda)</div>'
+    +'<div style="display:flex;gap:8px;margin-bottom:8px"><div style="flex:1">'+prod_buscador_html('prec-ins','+ Agregar insumo: buscar por nombre o SKU...')+'</div></div>'
+    +'<div id="prec-items"></div>'
+    +(cfg.costos?'<div class="form-grid" style="margin-top:10px"><div class="form-group"><label>Mano de obra por tanda ($)</label>'+prod_input('prec-mo','type="number" min="0" step="any" oninput="prod_rec_total()"', r?+r.costoManoObra:0)+'</div>'
+      +'<div class="form-group"><label>Gastos indirectos por tanda ($)</label>'+prod_input('prec-ind','type="number" min="0" step="any" oninput="prod_rec_total()" placeholder="luz, gas, alquiler..."', r?+r.costoIndirecto:0)+'</div></div>':'')
+    +(cfg.etapas&&et.length?'<div class="section-mini">Etapas por las que pasa</div><div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:8px">'
+      +et.map(function(e){ return '<label style="display:flex;align-items:center;gap:6px;padding:6px 10px;border:1px solid var(--border);border-radius:20px;font-size:12px;cursor:pointer"><input type="checkbox" class="prec-etapa" value="'+e.id+'"'+(etSel.indexOf(e.id)!==-1?' checked':'')+'/> '+imp_esc(e.nombre)+'</label>'; }).join('')+'</div>':'')
+    +'<div class="form-group full" style="margin-top:6px"><label>Procedimiento / notas</label><textarea id="prec-notas" rows="2" style="width:100%;background:var(--input-bg);border:1px solid var(--border);border-radius:8px;color:var(--text);padding:8px;font-size:13px;resize:vertical">'+imp_esc(r?r.notas||'':'')+'</textarea></div>'
+    +'<div id="prec-total" style="text-align:right;font-size:13px;margin:8px 0"></div>'
+    +'<div class="modal-footer"><button class="btn btn-primary" onclick="prod_receta_guardar()">Guardar receta</button><button class="btn btn-ghost" onclick="closeModal()">Cancelar</button></div>');
+  window._prod_busca_cb['prec-prod']=function(p){ window._prod_rec.producto=p; window._prod_rec.varianteId=null; prod_rec_var_render(); };
+  window._prod_busca_cb['prec-ins']=function(p){
+    if(window._prod_rec.producto && p.id===window._prod_rec.producto.id){ showToast('Un producto no puede ser insumo de su propia receta','warn'); return; }
+    window._prod_rec.items.push({insumo:p, varianteId:null, cantidad:1, um:p.um||'unidad', merma:0});
+    document.getElementById('prec-ins').value='';
+    prod_rec_items_render();
+  };
+  prod_rec_var_render(); prod_rec_items_render();
 }
-async function ot_guardar(){
-  var r=await apiPost('/api/v1/ordenes-trabajo',{cantidadPlanificada:+document.getElementById('ot-cant').value||1,fechaInicio:document.getElementById('ot-fecha').value,notas:document.getElementById('ot-notas').value});
-  if(r.id){showToast('OT creada ✅','ok');closeModal();MODULES.produccion();}
-  else showToast(r.message||'Error al crear','danger');
+function prod_rec_var_render(){
+  var p=window._prod_rec.producto, wrap=document.getElementById('prec-var-wrap'); if(!wrap) return;
+  var vs=(p&&p.variantes)||[];
+  if(!window._prod.cfg.variantes || !vs.length){ wrap.style.display='none'; return; }
+  wrap.style.display='';
+  document.getElementById('prec-var').innerHTML='<option value="">Todas las variantes</option>'+vs.map(function(v){return '<option value="'+v.id+'"'+(window._prod_rec.varianteId===v.id?' selected':'')+'>'+imp_esc(prod_var_txt(v))+'</option>';}).join('');
+}
+function prod_rec_items_render(){
+  var cfg=window._prod.cfg, el=document.getElementById('prec-items'); if(!el) return;
+  var its=window._prod_rec.items;
+  if(!its.length){ el.innerHTML='<div style="color:var(--text3);font-size:12px;padding:8px 0">Todavía no agregaste insumos.</div>'; prod_rec_total(); return; }
+  el.innerHTML='<div class="table-wrap"><table><thead><tr><th>Insumo</th>'+(cfg.variantes?'<th>Variante</th>':'')+'<th style="width:110px">Cantidad</th><th style="width:90px">Unidad</th>'+(cfg.merma?'<th style="width:80px">Merma %</th>':'')+'<th style="text-align:right">Costo</th><th></th></tr></thead><tbody>'
+    +its.map(function(it,i){
+      var vs=it.insumo.variantes||[];
+      return '<tr><td style="font-weight:600">'+imp_esc(it.insumo.nombre)+'</td>'
+        +(cfg.variantes?'<td>'+(vs.length?'<select onchange="window._prod_rec.items['+i+'].varianteId=this.value||null;prod_rec_total()" style="'+prod_select_style()+';padding:6px"><option value="">—</option>'+vs.map(function(v){return '<option value="'+v.id+'"'+(it.varianteId===v.id?' selected':'')+'>'+imp_esc(prod_var_txt(v))+'</option>';}).join('')+'</select>':'<span style="color:var(--text3)">—</span>')+'</td>':'')
+        +'<td><input type="number" min="0" step="any" value="'+it.cantidad+'" oninput="window._prod_rec.items['+i+'].cantidad=+this.value;prod_rec_total()" style="width:100%;'+prod_select_style()+';padding:6px"/></td>'
+        +'<td><input value="'+imp_esc(it.um)+'" oninput="window._prod_rec.items['+i+'].um=this.value" style="width:100%;'+prod_select_style()+';padding:6px"/></td>'
+        +(cfg.merma?'<td><input type="number" min="0" max="99" step="any" value="'+it.merma+'" oninput="window._prod_rec.items['+i+'].merma=+this.value;prod_rec_total()" style="width:100%;'+prod_select_style()+';padding:6px"/></td>':'')
+        +'<td style="text-align:right" id="prec-c'+i+'"></td>'
+        +'<td><button class="btn-icon" onclick="window._prod_rec.items.splice('+i+',1);prod_rec_items_render()">✕</button></td></tr>';
+    }).join('')+'</tbody></table></div>';
+  prod_rec_total();
+}
+function prod_rec_costo_unit(it){
+  var v=it.varianteId&&(it.insumo.variantes||[]).find(function(x){return x.id===it.varianteId;});
+  return Number(v&&v.precioCosto!=null?v.precioCosto:it.insumo.precioCosto)||0;
+}
+function prod_rec_total(){
+  var cfg=window._prod.cfg, tot=0;
+  (window._prod_rec.items||[]).forEach(function(it,i){
+    var c=prod_rec_costo_unit(it)*(+it.cantidad||0)*(1+(cfg.merma?(+it.merma||0):0)/100);
+    tot+=c; var el=document.getElementById('prec-c'+i); if(el) el.textContent=fmtPeso(c);
+  });
+  var mo=cfg.costos?(+((document.getElementById('prec-mo')||{}).value)||0)+(+((document.getElementById('prec-ind')||{}).value)||0):0;
+  var rinde=+((document.getElementById('prec-rinde')||{}).value)||1;
+  var el=document.getElementById('prec-total');
+  if(el) el.innerHTML='Costo por tanda: <b>'+fmtPeso(tot+mo)+'</b> · por unidad: <b>'+fmtPeso((tot+mo)/rinde)+'</b>';
+}
+async function prod_receta_guardar(){
+  var R=window._prod_rec, cfg=window._prod.cfg;
+  if(!R.producto){ showToast('Elegí el producto que se fabrica','danger'); return; }
+  if(!R.items.length){ showToast('Agregá al menos un insumo','danger'); return; }
+  if(R.items.some(function(i){return !(+i.cantidad>0);})){ showToast('Cada insumo necesita una cantidad mayor a 0','danger'); return; }
+  var body={
+    productoId:R.producto.id,
+    varianteId:(document.getElementById('prec-var')||{}).value||null,
+    nombre:document.getElementById('prec-nombre').value.trim(),
+    rendimiento:+document.getElementById('prec-rinde').value||1,
+    costoManoObra:cfg.costos?(+document.getElementById('prec-mo').value||0):undefined,
+    costoIndirecto:cfg.costos?(+document.getElementById('prec-ind').value||0):undefined,
+    etapas:[].slice.call(document.querySelectorAll('.prec-etapa:checked')).map(function(c){return c.value;}),
+    notas:document.getElementById('prec-notas').value,
+    items:R.items.map(function(i){ return {insumoId:i.insumo.id, varianteId:i.varianteId||null, cantidad:+i.cantidad, um:i.um||undefined, merma:cfg.merma?(+i.merma||0):0}; }),
+  };
+  if(body.etapas.length===(window._prod.etapas||[]).length) body.etapas=[]; // todas = default
+  var r=R.id?await apiPut('/api/v1/produccion/recetas/'+R.id, body):await apiPost('/api/v1/produccion/recetas', body);
+  if(await prod_err(r)) return;
+  showToast('Receta guardada ✅','ok'); closeModal();
+  if(window._prod.tab!=='recetas') prod_tab('recetas'); else prod_cargar();
+}
+async function prod_receta_duplicar(id){
+  var r=await apiPost('/api/v1/produccion/recetas/'+id+'/duplicar',{});
+  if(await prod_err(r)) return;
+  showToast('Receta duplicada — editá la copia','ok'); prod_cargar();
+}
+function prod_receta_eliminar(id){
+  openModal('<h3 class="modal-title">Eliminar receta</h3><p style="color:var(--text2);font-size:13px">Las órdenes ya creadas con esta receta no cambian.</p>'
+    +'<div class="modal-footer"><button class="btn btn-danger" onclick="prod_receta_eliminar_ok(\''+id+'\')">Eliminar</button><button class="btn btn-ghost" onclick="closeModal()">Cancelar</button></div>');
+}
+async function prod_receta_eliminar_ok(id){
+  var r=await apiDel('/api/v1/produccion/recetas/'+id);
+  if(await prod_err(r)) return;
+  closeModal(); showToast('Receta eliminada','ok'); prod_cargar();
+}
+
+/* ── Nueva orden de trabajo ── */
+async function prod_ot_modal(bomId){
+  var cfg=window._prod.cfg;
+  var [recetas, sucs, resp]=await Promise.all([
+    apiList('/api/v1/produccion/recetas'),
+    apiList('/api/v1/configuracion/sucursales').catch(function(){return [];}),
+    cfg.responsable?apiList('/api/v1/produccion/responsables').catch(function(){return [];}):Promise.resolve([]),
+  ]);
+  if(!recetas.length){
+    openModal('<h3 class="modal-title">Primero, una receta</h3><p style="color:var(--text2);font-size:13px;margin-bottom:12px">Para crear una orden necesitás la receta del producto: qué insumos lleva y cuánto rinde.</p>'
+      +'<div class="modal-footer"><button class="btn btn-primary" onclick="prod_receta_modal()">+ Crear receta</button><button class="btn btn-ghost" onclick="closeModal()">Cancelar</button></div>');
+    return;
+  }
+  window._prod_ot={recetas:recetas, producto:null};
+  var sucActivas=sucs.filter(function(s){return s.activa!==false;});
+  openModalWide('<h3 class="modal-title">Nueva orden de trabajo</h3>'
+    +'<div class="form-grid">'
+    +'<div class="form-group full"><label>¿Qué vas a producir? *</label><select id="pot-rec" onchange="prod_ot_receta()" style="'+prod_select_style()+'"><option value="">Elegí una receta...</option>'
+    +recetas.filter(function(r){return !r.varianteId;}).concat(recetas.filter(function(r){return r.varianteId;})).map(function(r){return '<option value="'+r.id+'"'+(r.id===bomId?' selected':'')+'>'+imp_esc(r.productoNombre)+(r.varianteTxt?' ('+imp_esc(r.varianteTxt)+')':'')+(r.nombre?' — '+imp_esc(r.nombre):'')+'</option>';}).join('')+'</select></div>'
+    +'<div class="form-group full" id="pot-cant-wrap"></div>'
+    +(sucActivas.length>1?'<div class="form-group"><label>Sucursal (de dónde salen los insumos)</label><select id="pot-suc" onchange="prod_ot_calcular()" style="'+prod_select_style()+'">'+sucActivas.map(function(s){return '<option value="'+s.id+'"'+(currentUser.sucursalId===s.id?' selected':'')+'>'+imp_esc(s.nombre)+'</option>';}).join('')+'</select></div>':'')
+    +(cfg.fechaEst?'<div class="form-group"><label>Fecha estimada de fin</label>'+prod_input('pot-fin','type="date"','')+'</div>':'')
+    +(cfg.prioridad?'<div class="form-group"><label>Prioridad</label><select id="pot-prio" style="'+prod_select_style()+'">'+PROD_PRIORIDADES.map(function(p){return '<option value="'+p.id+'"'+(p.id==='NORMAL'?' selected':'')+'>'+p.label+'</option>';}).join('')+'</select></div>':'')
+    +(cfg.responsable?'<div class="form-group"><label>Responsable</label><select id="pot-resp" style="'+prod_select_style()+'"><option value="">—</option>'+resp.map(function(u){return '<option value="'+u.id+'">'+imp_esc(u.nombre)+'</option>';}).join('')+'</select></div>':'')
+    +'<div class="form-group full"><label>Observaciones</label>'+prod_input('pot-obs','placeholder="Opcional"','')+'</div>'
+    +'</div>'
+    +'<div class="section-mini">Insumos necesarios</div><div id="pot-calc" style="font-size:12px;color:var(--text3)">Elegí la receta y la cantidad.</div>'
+    +'<div class="modal-footer"><button class="btn btn-primary" onclick="prod_ot_guardar(false)">Crear orden</button><button class="btn btn-ghost" onclick="prod_ot_guardar(true)" title="Crea la orden y descuenta los insumos ahora">Crear e iniciar</button><button class="btn btn-ghost" onclick="closeModal()">Cancelar</button></div>');
+  if(bomId) prod_ot_receta();
+}
+async function prod_ot_receta(){
+  var id=document.getElementById('pot-rec').value, wrap=document.getElementById('pot-cant-wrap');
+  var rec=window._prod_ot.recetas.find(function(r){return r.id===id;});
+  if(!rec){ wrap.innerHTML=''; return; }
+  var prod=await apiGet('/api/v1/productos/'+rec.productoId).catch(function(){return null;});
+  window._prod_ot.producto=prod; window._prod_ot.receta=rec;
+  var vs=(prod&&prod.variantes)||[];
+  var um=imp_esc(rec.productoUm||'unidades');
+  if(window._prod.cfg.variantes && vs.length && !rec.varianteId){
+    wrap.innerHTML='<label>Cantidad por variante (curva) — dejá en 0 las que no vas a producir</label>'
+      +'<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(110px,1fr));gap:8px">'
+      +vs.map(function(v){ return '<div><div style="font-size:11px;color:var(--text2);margin-bottom:2px">'+imp_esc(prod_var_txt(v))+'</div><input type="number" min="0" step="any" class="pot-var" data-var="'+v.id+'" value="0" oninput="prod_ot_calcular()" style="width:100%;'+prod_select_style()+'"/></div>'; }).join('')+'</div>';
+  } else {
+    wrap.innerHTML='<label>Cantidad a producir ('+um+') *</label><input id="pot-cant" type="number" min="0.001" step="any" value="'+(+rec.rendimiento||1)+'" oninput="prod_ot_calcular()" style="width:180px;'+prod_select_style()+'"/>'
+      +'<span style="font-size:12px;color:var(--text2);margin-left:8px">La receta rinde '+prod_num(rec.rendimiento)+' '+um+' por tanda</span>';
+  }
+  prod_ot_calcular();
+}
+function prod_ot_salidas(){
+  var rec=window._prod_ot.receta; if(!rec) return [];
+  var vars=document.querySelectorAll('.pot-var');
+  if(vars.length) return [].slice.call(vars).map(function(i){return {varianteId:i.dataset.var, cantidad:+i.value||0};}).filter(function(s){return s.cantidad>0;});
+  var c=+((document.getElementById('pot-cant')||{}).value)||0;
+  return c>0?[{varianteId:rec.varianteId||null, cantidad:c}]:[];
+}
+var _prod_calc_t=null;
+function prod_ot_calcular(){
+  clearTimeout(_prod_calc_t);
+  _prod_calc_t=setTimeout(async function(){
+    var el=document.getElementById('pot-calc'); if(!el) return;
+    var sal=prod_ot_salidas(), rec=window._prod_ot.receta;
+    if(!rec||!sal.length){ el.innerHTML='Indicá cuánto vas a producir.'; return; }
+    var r=await apiPost('/api/v1/produccion/recetas/'+rec.id+'/calcular',{salidas:sal, sucursalId:(document.getElementById('pot-suc')||{}).value||null});
+    if(r.error){ el.innerHTML='<span style="color:var(--red-text)">'+imp_esc(r.message)+'</span>'; return; }
+    window._prod_ot.calc=r;
+    el.innerHTML=tableWrap(['Insumo','Necesita','Hay','Falta','Costo'], r.lineas.map(function(l){
+      return '<tr><td>'+imp_esc(l.nombre)+(l.varianteTxt?' <span style="color:var(--text2)">('+imp_esc(l.varianteTxt)+')</span>':'')+'</td>'
+        +'<td>'+prod_num(l.cantidad)+' '+imp_esc(l.um)+'</td><td>'+prod_num(l.stock)+'</td>'
+        +'<td>'+(l.falta>0?'<span style="color:var(--red-text);font-weight:600">'+prod_num(l.falta)+'</span>':'<span style="color:var(--green-text,#10B981)">✓</span>')+'</td>'
+        +'<td style="text-align:right">'+fmtPeso(l.costo)+'</td></tr>';
+    }).join(''))
+    +'<div style="text-align:right;margin-top:6px;font-size:13px;color:var(--text)">Costo estimado: <b>'+fmtPeso(r.costoTotal)+'</b> · por unidad <b>'+fmtPeso(r.costoUnitario)+'</b>'+(r.costoExtra?' <span style="color:var(--text2)">(incluye '+fmtPeso(r.costoExtra)+' de mano de obra y gastos)</span>':'')+'</div>'
+    +(r.faltan?'<div style="margin-top:6px;color:var(--amber-text);font-size:12px">⚠️ Faltan '+r.faltan+' insumo(s). Podés crear la orden igual y comprarlos — mirá la pestaña Planificación.</div>':'');
+  }, 250);
+}
+async function prod_ot_guardar(iniciar){
+  var rec=window._prod_ot.receta, sal=prod_ot_salidas();
+  if(!rec){ showToast('Elegí una receta','danger'); return; }
+  if(!sal.length){ showToast('Indicá cuánto vas a producir','danger'); return; }
+  var g=function(id){ var e=document.getElementById(id); return e?e.value:undefined; };
+  var r=await apiPost('/api/v1/produccion/ordenes',{
+    bomId:rec.id, salidas:sal, sucursalId:g('pot-suc')||null, fechaFinEst:g('pot-fin')||null,
+    prioridad:g('pot-prio')||undefined, responsableId:g('pot-resp')||null, observaciones:g('pot-obs')||undefined,
+  });
+  if(await prod_err(r)) return;
+  closeModal(); showToast('Orden '+prod_nro(r.nro)+' creada ✅','ok');
+  if(iniciar) await prod_iniciar(r.id); else prod_cargar();
+}
+
+/* ── Acciones ── */
+async function prod_iniciar(id, etapaId, forzar){
+  var r=await apiPost('/api/v1/produccion/ordenes/'+id+'/iniciar',{etapaId:etapaId||undefined, forzar:!!forzar});
+  if(r.code==='sin_stock'){
+    openModal('<h3 class="modal-title">No alcanzan los insumos</h3>'
+      +'<p style="color:var(--text2);font-size:13px;margin-bottom:10px">Para iniciar la orden faltan:</p>'
+      +tableWrap(['Insumo','Necesita','Hay','Falta'], r.faltantes.map(function(f){return '<tr><td>'+imp_esc(f.nombre||'')+(f.varianteTxt?' ('+imp_esc(f.varianteTxt)+')':'')+'</td><td>'+prod_num(f.necesita)+'</td><td>'+prod_num(f.hay)+'</td><td style="color:var(--red-text);font-weight:600">'+prod_num(f.falta)+'</td></tr>';}).join(''))
+      +'<div class="modal-footer">'
+      +'<button class="btn btn-primary" onclick="closeModal();prod_tab(\'planificacion\')">Ver qué comprar</button>'
+      +(currentUser.rol==='admin'?'<button class="btn btn-ghost" onclick="closeModal();prod_iniciar(\''+id+'\','+(etapaId?'\''+etapaId+'\'':'null')+',true)" title="El stock de esos insumos queda en negativo">Iniciar igual</button>':'')
+      +'<button class="btn btn-ghost" onclick="closeModal()">Cerrar</button></div>');
+    return;
+  }
+  if(await prod_err(r,'No se pudo iniciar')) return;
+  showToast('Orden iniciada — los insumos salieron del stock','ok');
+  prod_cargar();
+}
+async function prod_estado(id, estado){
+  var r=await apiPatch('/api/v1/produccion/ordenes/'+id+'/estado',{estado:estado});
+  if(await prod_err(r)) return;
+  showToast(estado==='PAUSADA'?'Orden pausada':'Orden reanudada','ok'); closeModal(); prod_cargar();
+}
+async function prod_completar_modal(id){
+  var o=await apiGet('/api/v1/produccion/ordenes/'+id).catch(function(){return null;});
+  if(!o){ showToast('No se pudo abrir la orden','danger'); return; }
+  var cfg=window._prod.cfg;
+  openModalWide('<h3 class="modal-title">Completar '+prod_nro(o.nro)+' — '+imp_esc(o.productoNombre)+'</h3>'
+    +(o.estado==='PLANIFICADA'?'<div style="background:var(--surface2);border-radius:10px;padding:10px;font-size:12px;margin-bottom:10px">La orden no se inició: al completarla se descuentan los insumos y entra lo producido en un solo paso.</div>':'')
+    +'<div class="section-mini">¿Cuánto se produjo?</div>'
+    +'<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(140px,1fr));gap:8px;margin-bottom:10px">'
+    +o.salidas.map(function(s){ return '<div><div style="font-size:11px;color:var(--text2);margin-bottom:2px">'+imp_esc(s.varianteTxt||o.productoNombre)+' (plan '+prod_num(s.cantPlanif)+')</div><input type="number" min="0" step="any" class="pcomp-sal" data-id="'+s.id+'" value="'+(+s.cantPlanif)+'" style="width:100%;'+prod_select_style()+'"/></div>'; }).join('')+'</div>'
+    +'<details style="margin-bottom:10px"><summary style="cursor:pointer;font-size:13px;color:var(--accent-text)">¿Se usó una cantidad distinta de algún insumo? (opcional)</summary>'
+    +'<div style="font-size:12px;color:var(--text2);margin:6px 0">Si sobró, se devuelve al stock; si se usó más, se descuenta la diferencia.</div>'
+    +tableWrap(['Insumo','Previsto','Real'], o.lineas.map(function(l){
+      var prev=o.insumosDescontados?+l.cantConsumida:+l.cantPlanif;
+      return '<tr><td>'+imp_esc(l.nombre)+(l.varianteTxt?' ('+imp_esc(l.varianteTxt)+')':'')+'</td><td>'+prod_num(prev)+' '+imp_esc(l.um)+'</td><td><input type="number" min="0" step="any" class="pcomp-lin" data-id="'+l.id+'" data-prev="'+prev+'" value="'+prev+'" style="width:110px;'+prod_select_style()+';padding:6px"/></td></tr>';
+    }).join(''))+'</details>'
+    +(cfg.lotes?'<div class="form-grid"><div class="form-group"><label>Nº de lote</label>'+prod_input('pcomp-lote','placeholder="Ej: L-'+new Date().toISOString().slice(2,10).replace(/-/g,'')+'"','')+'</div><div class="form-group"><label>Vencimiento</label>'+prod_input('pcomp-venc','type="date"','')+'</div></div>':'')
+    +'<label style="display:flex;align-items:center;gap:8px;font-size:13px;margin-top:6px"><input type="checkbox" id="pcomp-costo"'+(cfg.actualizarCosto?' checked':'')+'/> Actualizar el costo del producto con el costo real de esta orden</label>'
+    +'<div class="modal-footer"><button class="btn btn-primary" onclick="prod_completar_ok(\''+id+'\')">Completar orden</button><button class="btn btn-ghost" onclick="closeModal()">Cancelar</button></div>');
+}
+async function prod_completar_ok(id, forzar){
+  var body={
+    salidas:[].slice.call(document.querySelectorAll('.pcomp-sal')).map(function(i){return {id:i.dataset.id, cantProd:+i.value||0};}),
+    consumos:[].slice.call(document.querySelectorAll('.pcomp-lin')).filter(function(i){return +i.value!==+i.dataset.prev;}).map(function(i){return {id:i.dataset.id, cantReal:+i.value||0};}),
+    actualizarCosto:!!(document.getElementById('pcomp-costo')||{}).checked,
+    forzar:!!forzar,
+  };
+  var lote=document.getElementById('pcomp-lote'); if(lote&&lote.value.trim()){ body.loteNro=lote.value.trim(); body.fechaVenc=(document.getElementById('pcomp-venc')||{}).value||null; }
+  var r=await apiPost('/api/v1/produccion/ordenes/'+id+'/completar', body);
+  if(r.code==='sin_stock'){
+    if(currentUser.rol==='admin'){
+      openConfirm('<h3 class="modal-title">Faltan insumos</h3><p style="font-size:13px;color:var(--text2)">'+r.faltantes.map(function(f){return imp_esc(f.nombre)+': faltan '+prod_num(f.falta);}).join('<br>')+'</p>'
+        +'<div class="modal-footer"><button class="btn btn-primary" onclick="closeConfirm();prod_completar_ok(\''+id+'\',true)">Completar igual (stock negativo)</button><button class="btn btn-ghost" onclick="closeConfirm()">Cancelar</button></div>');
+    } else showToast('Faltan insumos: '+r.faltantes.map(function(f){return f.nombre;}).join(', '),'danger');
+    return;
+  }
+  if(await prod_err(r,'No se pudo completar')) return;
+  closeModal();
+  showToast('✅ '+prod_nro(r.nro)+' completada: '+prod_num(r.cantProd)+' u · costo '+fmtPeso(r.costoUnitario)+' c/u','ok');
+  prod_cargar();
+}
+function prod_cancelar_modal(id, descontados){
+  openModal('<h3 class="modal-title">Cancelar orden</h3>'
+    +(descontados?'<label style="display:flex;align-items:center;gap:8px;font-size:13px;margin:8px 0"><input type="checkbox" id="pcan-dev" checked/> Devolver los insumos al stock</label><p style="font-size:12px;color:var(--text2)">Destildalo si los insumos ya se usaron o se perdieron.</p>':'<p style="font-size:13px;color:var(--text2)">La orden no se inició: no se movió stock.</p>')
+    +'<div class="modal-footer"><button class="btn btn-danger" onclick="prod_cancelar_ok(\''+id+'\')">Cancelar orden</button><button class="btn btn-ghost" onclick="closeModal()">Volver</button></div>');
+}
+async function prod_cancelar_ok(id){
+  var dev=document.getElementById('pcan-dev');
+  var r=await apiPost('/api/v1/produccion/ordenes/'+id+'/cancelar',{devolver:dev?dev.checked:true});
+  if(await prod_err(r)) return;
+  closeModal(); showToast('Orden cancelada','ok'); prod_cargar();
+}
+async function prod_eliminar(id){
+  var r=await apiDel('/api/v1/produccion/ordenes/'+id);
+  if(await prod_err(r)) return;
+  closeModal(); showToast('Orden eliminada','ok'); prod_cargar();
+}
+
+/* ── Ficha de la orden ── */
+async function prod_ficha(id){
+  var o=await apiGet('/api/v1/produccion/ordenes/'+id).catch(function(){return null;});
+  if(!o){ showToast('No se pudo abrir la orden','danger'); return; }
+  var cfg=window._prod.cfg, esAdmin=currentUser.rol==='admin';
+  var resp=cfg.responsable?await apiList('/api/v1/produccion/responsables').catch(function(){return [];}):[];
+  var respOpts=function(sel){ return '<option value="">—</option>'+resp.map(function(u){return '<option value="'+u.id+'"'+(u.id===sel?' selected':'')+'>'+imp_esc(u.nombre)+'</option>';}).join(''); };
+  var abierta=['PLANIFICADA','EN_PROCESO','PAUSADA'].indexOf(o.estado)!==-1;
+  var falt={}; (o.faltantes||[]).forEach(function(f){ falt[f.productoId+'|'+(f.varianteId||'')]=f; });
+  var acciones='';
+  if(o.estado==='PLANIFICADA') acciones+='<button class="btn btn-primary" onclick="closeModal();prod_iniciar(\''+o.id+'\')">▶ Iniciar (descontar insumos)</button>';
+  if(o.estado==='EN_PROCESO') acciones+='<button class="btn btn-ghost" onclick="prod_estado(\''+o.id+'\',\'PAUSADA\')">'+ICON_PAUSE+' Pausar</button>';
+  if(o.estado==='PAUSADA') acciones+='<button class="btn btn-ghost" onclick="prod_estado(\''+o.id+'\',\'EN_PROCESO\')">'+ICON_PLAY+' Reanudar</button>';
+  if(abierta) acciones+='<button class="btn btn-primary" onclick="prod_completar_modal(\''+o.id+'\')">✓ Completar</button><button class="btn btn-ghost" onclick="prod_cancelar_modal(\''+o.id+'\','+(o.insumosDescontados?'true':'false')+')">Cancelar orden</button>';
+  if(esAdmin && (o.estado==='CANCELADA' || (o.estado==='PLANIFICADA' && !o.insumosDescontados))) acciones+='<button class="btn btn-ghost" style="color:var(--red-text)" onclick="prod_eliminar(\''+o.id+'\')">'+ICON_TRASH+' Eliminar</button>';
+  openModalWide('<div style="display:flex;justify-content:space-between;align-items:flex-start;gap:10px;flex-wrap:wrap;margin-bottom:10px">'
+      +'<div><div style="font-family:var(--mono);font-weight:700;color:var(--accent-text)">'+prod_nro(o.nro)+'</div><h3 class="modal-title" style="margin:2px 0">'+imp_esc(o.productoNombre)+'</h3>'
+      +'<div style="font-size:12px;color:var(--text2)">Creada '+prod_fecha(o.creadoEn)+(o.creadoPorNombre?' por '+imp_esc(o.creadoPorNombre):'')+(o.bom&&o.bom.nombre?' · receta "'+imp_esc(o.bom.nombre)+'"':'')+'</div></div>'
+      +'<div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap">'+prod_estado_badge(o.estado)+(cfg.prioridad&&o.prioridad!=='NORMAL'?'<span class="badge" style="background:'+prod_prioridad(o.prioridad).color+'22;color:'+prod_prioridad(o.prioridad).color+'">'+prod_prioridad(o.prioridad).label+'</span>':'')+(prod_demorada(o)?'<span class="badge b-red">Demorada</span>':'')+'</div></div>'
+    +'<div class="form-grid" style="margin-bottom:6px">'
+    +'<div class="form-group"><label>A producir</label><div style="font-weight:600">'+prod_num(o.cantPlanif)+' '+imp_esc(o.productoUm)+(o.estado==='COMPLETADA'?' · producido <span style="color:var(--green-text,#10B981)">'+prod_num(o.cantProd)+'</span>':'')+'</div>'
+      +(prod_salidas_txt(o)?'<div style="font-size:12px;color:var(--text2)">'+o.salidas.map(function(s){return imp_esc(s.varianteTxt||'—')+': '+prod_num(s.cantPlanif)+(o.estado==='COMPLETADA'?' → '+prod_num(s.cantProd):'');}).join(' · ')+'</div>':'')+'</div>'
+    +(cfg.responsable?'<div class="form-group"><label>Responsable</label>'+(abierta?'<select onchange="prod_ficha_put(\''+o.id+'\',{responsableId:this.value||null})" style="'+prod_select_style()+'">'+respOpts(o.responsableId)+'</select>':'<div>'+imp_esc(o.responsableNombre||'—')+'</div>')+'</div>':'')
+    +(cfg.fechaEst?'<div class="form-group"><label>Fecha estimada</label>'+(abierta?'<input type="date" value="'+(o.fechaFinEst?String(o.fechaFinEst).slice(0,10):'')+'" onchange="prod_ficha_put(\''+o.id+'\',{fechaFinEst:this.value||null})" style="'+prod_select_style()+'"/>':'<div>'+(prod_fecha(o.fechaFinEst)||'—')+'</div>')+'</div>':'')
+    +(o.loteNro?'<div class="form-group"><label>Lote</label><div>'+imp_esc(o.loteNro)+(o.fechaVenc?' · vence '+prod_fecha(o.fechaVenc):'')+'</div></div>':'')
+    +'</div>'
+    +(o.observaciones?'<div style="font-size:13px;margin-bottom:8px;color:var(--text2)">📝 '+imp_esc(o.observaciones)+'</div>':'')
+    +(o.bom&&o.bom.notas?'<details style="margin-bottom:8px"><summary style="cursor:pointer;font-size:13px;color:var(--accent-text)">Procedimiento de la receta</summary><div style="white-space:pre-wrap;font-size:13px;margin-top:6px">'+imp_esc(o.bom.notas)+'</div></details>':'')
+    +(cfg.etapas&&o.etapas.length?'<div class="section-mini">Recorrido</div><div style="display:flex;flex-direction:column;gap:6px;margin-bottom:10px">'
+      +o.etapas.map(function(e){
+        var col=e.estado==='HECHA'?'#10B981':e.estado==='EN_CURSO'?'#1E40FF':'#94A3B8';
+        return '<div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;padding:8px 10px;border:1px solid var(--border);border-radius:10px;border-left:3px solid '+col+'">'
+          +'<span style="font-weight:600;min-width:120px">'+(e.estado==='HECHA'?'✓ ':e.estado==='EN_CURSO'?'● ':'○ ')+imp_esc(e.nombre)+'</span>'
+          +'<span style="font-size:11px;color:var(--text2);flex:1">'+(e.inicio?'desde '+fmtDateTime(e.inicio):'')+(e.fin?' · terminó '+fmtDateTime(e.fin):'')+'</span>'
+          +(cfg.responsable?(abierta?'<select onchange="prod_etapa_put(\''+o.id+'\',\''+e.id+'\',{responsableId:this.value||null})" style="'+prod_select_style()+';width:auto;padding:5px">'+respOpts(e.responsableId)+'</select>':'<span style="font-size:12px">'+imp_esc(e.responsableNombre||'')+'</span>'):'')
+          +(abierta&&o.estado!=='PLANIFICADA'&&e.estado!=='EN_CURSO'?'<button class="btn btn-ghost btn-sm" onclick="prod_mover_etapa(\''+o.id+'\',\''+e.etapaId+'\')">Mover acá</button>':'')
+          +'</div>';
+      }).join('')+'</div>':'')
+    +'<div class="section-mini">Insumos</div>'
+    +tableWrap(['Insumo','Previsto',o.insumosDescontados?'Usado':'Hay en stock','Costo'], o.lineas.map(function(l){
+      var f=falt[l.productoId+'|'+(l.varianteId||'')];
+      return '<tr><td>'+imp_esc(l.nombre)+(l.varianteTxt?' <span style="color:var(--text2)">('+imp_esc(l.varianteTxt)+')</span>':'')+'</td><td>'+prod_num(l.cantPlanif)+' '+imp_esc(l.um)+'</td>'
+        +'<td>'+(o.insumosDescontados?prod_num(l.cantConsumida):(f?'<span style="color:var(--red-text);font-weight:600">'+prod_num(f.hay)+' (faltan '+prod_num(f.falta)+')</span>':'<span style="color:var(--green-text,#10B981)">✓ alcanza</span>'))+'</td>'
+        +'<td style="text-align:right">'+(o.insumosDescontados?fmtPeso(Number(l.costoUnit)*Number(l.cantConsumida)):'—')+'</td></tr>';
+    }).join(''))
+    +(o.estado==='COMPLETADA'?'<div style="display:flex;gap:16px;justify-content:flex-end;flex-wrap:wrap;font-size:13px;margin-top:8px">'
+      +'<span>Insumos <b>'+fmtPeso(o.costoInsumos)+'</b></span>'+(cfg.costos?'<span>Mano de obra <b>'+fmtPeso(o.costoManoObra)+'</b></span><span>Indirectos <b>'+fmtPeso(o.costoIndirecto)+'</b></span>':'')
+      +'<span>Total <b>'+fmtPeso(o.costoTotal)+'</b></span><span>Por unidad <b>'+fmtPeso(o.costoUnitario)+'</b></span></div>':'')
+    +(o.movimientos&&o.movimientos.length?'<details style="margin-top:10px"><summary style="cursor:pointer;font-size:13px;color:var(--accent-text)">Movimientos de stock ('+o.movimientos.length+')</summary><div style="font-size:12px;margin-top:6px">'
+      +o.movimientos.map(function(m){return '<div style="padding:3px 0;border-bottom:1px solid var(--border)">'+fmtDateTime(m.fecha)+' · '+imp_esc(m.referencia||m.tipo)+' · <b style="color:'+(Number(m.cantidad)<0?'var(--red-text)':'var(--green-text,#10B981)')+'">'+(Number(m.cantidad)>0?'+':'')+prod_num(m.cantidad)+'</b>'+(m.usuario?' · '+imp_esc(m.usuario.nombre):'')+'</div>';}).join('')+'</div></details>':'')
+    +'<div class="modal-footer" style="flex-wrap:wrap">'+acciones+'<button class="btn btn-ghost" onclick="closeModal()">Cerrar</button></div>');
+}
+async function prod_ficha_put(id, body){
+  var r=await apiPut('/api/v1/produccion/ordenes/'+id, body);
+  if(await prod_err(r)) return;
+  showToast('Guardado','ok'); prod_cargar();
+}
+async function prod_etapa_put(id, filaId, body){
+  var r=await apiPut('/api/v1/produccion/ordenes/'+id+'/etapas/'+filaId, body);
+  if(await prod_err(r)) return;
+  showToast('Guardado','ok');
+}
+async function prod_mover_etapa(id, etapaId){
+  var r=await apiPatch('/api/v1/produccion/ordenes/'+id+'/etapa',{etapaId:etapaId});
+  if(await prod_err(r)) return;
+  prod_ficha(id); prod_cargar();
+}
+
+/* ── Planificación: qué falta comprar para las órdenes planificadas ── */
+async function prod_planif_render(cont){
+  var r=await apiGet('/api/v1/produccion/planificacion');
+  window._prod.planif=r;
+  if(!r.ots.length){
+    cont.innerHTML='<div style="text-align:center;padding:48px 16px;color:var(--text2)"><div style="font-size:34px;margin-bottom:8px">🧮</div><div style="font-weight:600;color:var(--text);margin-bottom:4px">No hay órdenes planificadas</div><div style="font-size:13px">Acá vas a ver qué insumos faltan para las órdenes que todavía no se iniciaron, agrupados por proveedor.</div></div>';
+    return;
+  }
+  var falt=r.items.filter(function(i){return i.falta>0;});
+  var grupos={}; falt.forEach(function(i){ var k=i.proveedorId||''; (grupos[k]=grupos[k]||{nombre:i.proveedorNombre||'Sin proveedor asignado', items:[]}).items.push(i); });
+  var html='<div style="font-size:13px;color:var(--text2);margin-bottom:10px">Insumos para '+r.ots.length+' orden(es) planificada(s): '+r.ots.map(function(o){return prod_nro(o.nro);}).join(', ')+'.</div>';
+  if(!falt.length) html+='<div style="background:var(--surface2);border-radius:10px;padding:14px;margin-bottom:12px">✅ Alcanzan todos los insumos. Podés iniciar las órdenes.</div>';
+  else {
+    html+='<div style="font-weight:600;margin-bottom:8px">Falta comprar · '+fmtPeso(r.costoFaltante)+' estimado</div>';
+    Object.keys(grupos).forEach(function(k){
+      var g=grupos[k];
+      html+='<div class="chart-card" style="padding:12px;margin-bottom:10px"><div style="display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:8px"><span style="font-weight:600">'+imp_esc(g.nombre)+'</span>'
+        +(isModuleActive('compras')&&canAccess('compras')?'<button class="btn btn-primary btn-sm" onclick="prod_planif_oc(\''+k+'\')">Armar orden de compra</button>':'')+'</div>'
+        +tableWrap(['Insumo','Necesita','Hay','Falta','Costo est.'], g.items.map(function(i){
+          return '<tr><td>'+imp_esc(i.nombre)+(i.varianteTxt?' ('+imp_esc(i.varianteTxt)+')':'')+'<div style="font-size:11px;color:var(--text2)">'+i.ots.map(function(n){return prod_nro(n);}).join(', ')+'</div></td><td>'+prod_num(i.necesita)+' '+imp_esc(i.um)+'</td><td>'+prod_num(i.stock)+'</td><td style="color:var(--red-text);font-weight:600">'+prod_num(i.falta)+'</td><td style="text-align:right">'+fmtPeso(i.costoFalta)+'</td></tr>';
+        }).join(''))+'</div>';
+    });
+  }
+  var ok=r.items.filter(function(i){return i.falta<=0;});
+  if(ok.length) html+='<details><summary style="cursor:pointer;font-size:13px;color:var(--accent-text)">Insumos que alcanzan ('+ok.length+')</summary>'
+    +tableWrap(['Insumo','Necesita','Hay'], ok.map(function(i){return '<tr><td>'+imp_esc(i.nombre)+(i.varianteTxt?' ('+imp_esc(i.varianteTxt)+')':'')+'</td><td>'+prod_num(i.necesita)+' '+imp_esc(i.um)+'</td><td>'+prod_num(i.stock)+'</td></tr>';}).join(''))+'</details>';
+  cont.innerHTML=html;
+}
+// Abre el mismo "Nueva orden de compra" de Compras ya cargado con lo que falta (el usuario revisa
+// precios/forma de pago y la confirma — la OC genera deuda con el proveedor, no se crea sola).
+async function prod_planif_oc(provId){
+  var items=(window._prod.planif.items||[]).filter(function(i){return i.falta>0 && (i.proveedorId||'')===provId;});
+  await modal_oc_nuevo();
+  if(provId){ var sel=document.getElementById('oc-pv'); if(sel) sel.value=provId; }
+  window._oc_items=items.map(function(i){ return {productoId:i.productoId, nombre:i.nombre+(i.varianteTxt?' ('+i.varianteTxt+')':''), cantidad:Math.ceil(i.falta*1000)/1000, precioUnitario:Math.round(i.costoUnit*100)/100}; });
+  oc_render_items();
+}
+
+/* ── Ajustes de producción (admin): campos opcionales + etapas ── */
+function prod_ajustes_modal(){
+  var cfg=window._prod.cfg;
+  window._prod_et_edit=(window._prod.etapas||[]).map(function(e){return {id:e.id, nombre:e.nombre, color:e.color};});
+  openModalWide('<h3 class="modal-title">Ajustes de producción</h3>'
+    +'<p style="font-size:12px;color:var(--text2);margin-bottom:10px">Prendé solo lo que tu negocio usa: lo apagado no aparece en ninguna pantalla.</p>'
+    +PROD_CFG_LABELS.map(function(c){
+      return '<div style="display:flex;align-items:center;gap:10px;padding:8px 0;border-bottom:1px solid var(--border)"><span style="flex:1"><span style="font-weight:500;font-size:13px">'+c.l+'</span><div style="font-size:11px;color:var(--text2)">'+c.d+'</div></span>'
+        +'<label class="toggle-sw"><input type="checkbox" class="pcfg" data-k="'+c.k+'"'+(cfg[c.k]?' checked':'')+'/><span class="toggle-track"><span class="toggle-thumb"></span></span></label></div>';
+    }).join('')
+    +'<div class="section-mini" style="margin-top:14px">Etapas del proceso</div>'
+    +'<div style="font-size:12px;color:var(--text2);margin-bottom:6px">Son las columnas del tablero, en orden. Ej: Corte → Costura → Planchado → Empaque.</div>'
+    +'<div id="pet-list"></div>'
+    +'<button class="btn btn-ghost btn-sm" onclick="window._prod_et_edit.push({nombre:\'\',color:\'#1E40FF\'});prod_et_render()">+ Agregar etapa</button>'
+    +'<div class="modal-footer"><button class="btn btn-primary" onclick="prod_ajustes_guardar()">Guardar</button><button class="btn btn-ghost" onclick="closeModal()">Cancelar</button></div>');
+  prod_et_render();
+}
+function prod_et_render(){
+  var L=window._prod_et_edit, el=document.getElementById('pet-list'); if(!el) return;
+  el.innerHTML=L.length?L.map(function(e,i){
+    return '<div style="display:flex;gap:6px;align-items:center;margin-bottom:6px">'
+      +'<input type="color" value="'+(e.color||'#1E40FF')+'" oninput="window._prod_et_edit['+i+'].color=this.value" style="width:36px;height:34px;border:none;background:none;padding:0"/>'
+      +'<input value="'+imp_esc(e.nombre)+'" placeholder="Nombre de la etapa" oninput="window._prod_et_edit['+i+'].nombre=this.value" style="flex:1;'+prod_select_style()+'"/>'
+      +'<button class="btn-icon" title="Subir" onclick="prod_et_mover('+i+',-1)"'+(i===0?' disabled':'')+'>↑</button>'
+      +'<button class="btn-icon" title="Bajar" onclick="prod_et_mover('+i+',1)"'+(i===L.length-1?' disabled':'')+'>↓</button>'
+      +'<button class="btn-icon" title="Quitar" onclick="window._prod_et_edit.splice('+i+',1);prod_et_render()">✕</button></div>';
+  }).join(''):'<div style="font-size:12px;color:var(--text3);margin-bottom:6px">Sin etapas: el tablero muestra Por iniciar → En proceso → Terminadas.</div>';
+}
+function prod_et_mover(i, d){ var L=window._prod_et_edit, j=i+d; if(j<0||j>=L.length) return; var t=L[i]; L[i]=L[j]; L[j]=t; prod_et_render(); }
+async function prod_ajustes_guardar(){
+  var body={}; document.querySelectorAll('.pcfg').forEach(function(c){ body[c.dataset.k]=c.checked; });
+  var et=window._prod_et_edit.filter(function(e){return (e.nombre||'').trim();}).map(function(e){return {id:e.id, nombre:e.nombre.trim(), color:e.color};});
+  var [c, e]=await Promise.all([apiPut('/api/v1/produccion/config', body), apiPut('/api/v1/produccion/etapas', {etapas:et})]);
+  if(await prod_err(c) || await prod_err(e)) return;
+  window._prod.cfg=c; window._prod.etapas=Array.isArray(e)?e:window._prod.etapas;
+  closeModal(); showToast('Ajustes de producción guardados ✅','ok'); prod_cargar();
 }
 
 /* ═══════════════════════════════════════
