@@ -41,6 +41,7 @@ async function main() {
 
   const { authPlugin }      = await import('./src/plugins/auth.js')
   const { tenantPlugin }    = await import('./src/plugins/tenant.js')
+  await import('./src/lib/zodUtil.js') // Zod 4: mensajes de validación en español (z.config global)
   const authRoutes          = (await import('./src/routes/v1/auth.js')).default
   const usersRoutes         = (await import('./src/routes/v1/users.js')).default
   const productosRoutes     = (await import('./src/routes/v1/productos.js')).default

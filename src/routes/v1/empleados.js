@@ -5,6 +5,7 @@
 // ─────────────────────────────────────────────────────────────
 
 import { z } from 'zod'
+import { parcial } from '../../lib/zodUtil.js'
 import bcrypt from 'bcryptjs'
 import * as XLSX from 'xlsx'
 import { prisma } from '../../lib/prisma.js'
@@ -77,7 +78,7 @@ export default async function empleadosRoutes(fastify) {
   // ── POST /empleados ────────────────────────────────────────
   fastify.post('/empleados', adminOnly, async (req, reply) => {
     const body = empleadoSchema.safeParse(req.body)
-    if (!body.success) return reply.status(400).send({ error: 'validation_error', message: body.error.errors[0].message })
+    if (!body.success) return reply.status(400).send({ error: 'validation_error', message: body.error.issues[0].message })
     body.data.nombre = tituloCase(body.data.nombre)
 
     const existe = await prisma.empleado.findFirst({ where: { tenantId: req.tenantId, legajo: body.data.legajo } })
@@ -92,8 +93,8 @@ export default async function empleadosRoutes(fastify) {
 
   // ── PUT /empleados/:id ─────────────────────────────────────
   fastify.put('/empleados/:id', adminOnly, async (req, reply) => {
-    const body = empleadoSchema.partial().safeParse(req.body)
-    if (!body.success) return reply.status(400).send({ error: 'validation_error', message: body.error.errors[0].message })
+    const body = parcial(empleadoSchema).safeParse(req.body)
+    if (!body.success) return reply.status(400).send({ error: 'validation_error', message: body.error.issues[0].message })
     if (body.data.nombre) body.data.nombre = tituloCase(body.data.nombre)
     const { pin, ...rest } = body.data
     const data = { ...rest, ...(pin && { pin: await bcrypt.hash(pin, 10) }) }
@@ -142,7 +143,7 @@ export default async function empleadosRoutes(fastify) {
       return reply.status(403).send({ error: 'modulo_oculto', message: 'El fichaje está desactivado. Un administrador lo puede activar desde Ajustes → Módulos.' })
     }
     const body = fichajeSchema.safeParse(req.body)
-    if (!body.success) return reply.status(400).send({ error: 'validation_error', message: body.error.errors[0].message })
+    if (!body.success) return reply.status(400).send({ error: 'validation_error', message: body.error.issues[0].message })
     const { legajo, tipo, sucursalId, pin } = body.data
 
     const emp = await prisma.empleado.findFirst({ where: { tenantId: req.tenantId, legajo, activo: true } })
@@ -217,7 +218,7 @@ export default async function empleadosRoutes(fastify) {
   // la máquina de estados normal (es un override explícito de admin).
   fastify.post('/fichajes/:id/corregir', adminOnly, async (req, reply) => {
     const body = corregirFichajeSchema.safeParse(req.body)
-    if (!body.success) return reply.status(400).send({ error: 'validation_error', message: body.error.errors[0].message })
+    if (!body.success) return reply.status(400).send({ error: 'validation_error', message: body.error.issues[0].message })
 
     const original = await prisma.fichaje.findFirst({ where: { id: req.params.id, tenantId: req.tenantId } })
     if (!original) return reply.status(404).send({ error: 'not_found', message: 'Fichaje no encontrado.' })

@@ -112,7 +112,7 @@ export default async function ordenesCompraRoutes(fastify) {
 
   fastify.post('/ordenes-compra', adminDep, async (req, reply) => {
     const body = ordenSchema.safeParse(req.body)
-    if (!body.success) return reply.status(400).send({ error: 'validation_error', message: body.error.errors[0].message })
+    if (!body.success) return reply.status(400).send({ error: 'validation_error', message: body.error.issues[0].message })
     const { ctaCte, formaPagoInterno, cajaSesionId, lineas, cotizacionOverride, ...ordenData } = body.data
 
     // Mismo gate que Gasto/PagoProveedor: solo ADMIN puede pagar desde Fondo/Transferencia Dueño
@@ -192,7 +192,7 @@ export default async function ordenesCompraRoutes(fastify) {
   // Recibe mercadería parcial o total → sube stock
   fastify.post('/ordenes-compra/:id/recepciones', adminDep, async (req, reply) => {
     const body = recepcionSchema.safeParse(req.body)
-    if (!body.success) return reply.status(400).send({ error: 'validation_error', message: body.error.errors[0].message })
+    if (!body.success) return reply.status(400).send({ error: 'validation_error', message: body.error.issues[0].message })
 
     const orden = await prisma.ordenCompra.findFirst({
       where: { id: req.params.id, tenantId: req.tenantId },

@@ -5,6 +5,7 @@
 // ─────────────────────────────────────────────────────────────
 
 import { z } from 'zod'
+import { parcial } from '../../lib/zodUtil.js'
 import { prisma } from '../../lib/prisma.js'
 import { asegurarCuentaInterna, saldoCuentaInterna, registrarMovimientoCuentaInterna, validarCajaParaPago } from '../../lib/cuentasInternas.js'
 import { tituloCase } from '../../lib/textUtils.js'
@@ -88,7 +89,7 @@ export default async function contableRoutes(fastify) {
   // ── POST /gastos ───────────────────────────────────────────
   fastify.post('/gastos', puedeGastar, async (req, reply) => {
     const body = gastoSchema.safeParse(req.body)
-    if (!body.success) return reply.status(400).send({ error: 'validation_error', message: body.error.errors[0].message })
+    if (!body.success) return reply.status(400).send({ error: 'validation_error', message: body.error.issues[0].message })
     const { formaPago, cajaSesionId, activo, cotizacionOverride, ...data } = body.data
 
     if (formaPago === 'FONDO' && req.user.rol !== 'ADMIN') {
@@ -123,8 +124,8 @@ export default async function contableRoutes(fastify) {
   // No permite cambiar formaPago/cajaSesionId (ya movió el saldo de Fondo/Transferencia/Caja al
   // crearse — reabrir eso queda fuera de alcance) — solo los campos descriptivos + reactivar.
   fastify.put('/gastos/:id', puedeGastar, async (req, reply) => {
-    const body = gastoSchema.partial().safeParse(req.body)
-    if (!body.success) return reply.status(400).send({ error: 'validation_error', message: body.error.errors[0].message })
+    const body = parcial(gastoSchema).safeParse(req.body)
+    if (!body.success) return reply.status(400).send({ error: 'validation_error', message: body.error.issues[0].message })
     const { formaPago, cajaSesionId, ...data } = body.data
     const r = await prisma.gasto.updateMany({ where: { id: req.params.id, tenantId: req.tenantId }, data })
     if (r.count === 0) return reply.status(404).send({ error: 'not_found', message: 'Gasto no encontrado.' })
@@ -157,7 +158,7 @@ export default async function contableRoutes(fastify) {
 
   fastify.post('/servicios-contratados', puedeGastar, async (req, reply) => {
     const body = servicioContratadoSchema.safeParse(req.body)
-    if (!body.success) return reply.status(400).send({ error: 'validation_error', message: body.error.errors[0].message })
+    if (!body.success) return reply.status(400).send({ error: 'validation_error', message: body.error.issues[0].message })
     const nombre = tituloCase(body.data.nombre)
     const existe = await prisma.servicioContratado.findFirst({ where: { tenantId: req.tenantId, nombre: { equals: nombre, mode: 'insensitive' } } })
     if (existe) return reply.status(409).send({ error: 'nombre_duplicado', message: 'Ya existe un servicio contratado con ese nombre.' })
@@ -215,7 +216,7 @@ export default async function contableRoutes(fastify) {
 
   fastify.post('/ingresos', puedeGastar, async (req, reply) => {
     const body = ingresoSchema.safeParse(req.body)
-    if (!body.success) return reply.status(400).send({ error: 'validation_error', message: body.error.errors[0].message })
+    if (!body.success) return reply.status(400).send({ error: 'validation_error', message: body.error.issues[0].message })
     const { formaPago, cajaSesionId, activo, cotizacionOverride, ...data } = body.data
 
     if (formaPago === 'FONDO' && req.user.rol !== 'ADMIN') {
@@ -247,8 +248,8 @@ export default async function contableRoutes(fastify) {
   })
 
   fastify.put('/ingresos/:id', puedeGastar, async (req, reply) => {
-    const body = ingresoSchema.partial().safeParse(req.body)
-    if (!body.success) return reply.status(400).send({ error: 'validation_error', message: body.error.errors[0].message })
+    const body = parcial(ingresoSchema).safeParse(req.body)
+    if (!body.success) return reply.status(400).send({ error: 'validation_error', message: body.error.issues[0].message })
     const { formaPago, cajaSesionId, ...data } = body.data
     const r = await prisma.ingreso.updateMany({ where: { id: req.params.id, tenantId: req.tenantId }, data })
     if (r.count === 0) return reply.status(404).send({ error: 'not_found', message: 'Ingreso no encontrado.' })

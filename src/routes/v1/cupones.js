@@ -9,6 +9,7 @@
 // ─────────────────────────────────────────────────────────────
 
 import { z } from 'zod'
+import { parcial } from '../../lib/zodUtil.js'
 import { prisma } from '../../lib/prisma.js'
 
 const cuponSchema = z.object({
@@ -68,7 +69,7 @@ export default async function cuponesRoutes(fastify) {
 
   fastify.post('/cupones', adminOnly, async (req, reply) => {
     const body = cuponSchema.safeParse(req.body)
-    if (!body.success) return reply.status(400).send({ error: 'validation_error', message: body.error.errors[0].message })
+    if (!body.success) return reply.status(400).send({ error: 'validation_error', message: body.error.issues[0].message })
     const existente = await prisma.cupon.findFirst({ where: { tenantId: req.tenantId, codigo: { equals: body.data.codigo, mode: 'insensitive' } } })
     if (existente) return reply.status(409).send({ error: 'codigo_duplicado', message: 'Ya existe un cupón con ese código.' })
     const cupon = await prisma.cupon.create({
@@ -83,8 +84,8 @@ export default async function cuponesRoutes(fastify) {
   })
 
   fastify.put('/cupones/:id', adminOnly, async (req, reply) => {
-    const body = cuponSchema.partial().safeParse(req.body)
-    if (!body.success) return reply.status(400).send({ error: 'validation_error', message: body.error.errors[0].message })
+    const body = parcial(cuponSchema).safeParse(req.body)
+    if (!body.success) return reply.status(400).send({ error: 'validation_error', message: body.error.issues[0].message })
     const data = { ...body.data }
     if (data.codigo) {
       const existente = await prisma.cupon.findFirst({ where: { tenantId: req.tenantId, codigo: { equals: data.codigo, mode: 'insensitive' }, id: { not: req.params.id } } })

@@ -149,7 +149,7 @@ export default async function cajaRoutes(fastify) {
   // ── POST /caja/abrir ──────────────────────────────────────
   fastify.post('/caja/abrir', { preHandler: [...auth.preHandler, fastify.requirePermiso('pos', 'crear')] }, async (req, reply) => {
     const body = abrirSchema.safeParse(req.body)
-    if (!body.success) return reply.status(400).send({ error: 'validation_error', message: body.error.errors[0].message })
+    if (!body.success) return reply.status(400).send({ error: 'validation_error', message: body.error.issues[0].message })
 
     const existente = await prisma.cajaSesion.findFirst({
       where: { tenantId: req.tenantId, usuarioId: req.user.id, estado: 'ABIERTA' },
@@ -200,7 +200,7 @@ export default async function cajaRoutes(fastify) {
   // (el "reporte X" del turno) y marca la sesión como cerrada.
   fastify.post('/caja/:id/cerrar', { preHandler: [...auth.preHandler, fastify.requirePermiso('pos', 'editar')] }, async (req, reply) => {
     const body = cerrarSchema.safeParse(req.body)
-    if (!body.success) return reply.status(400).send({ error: 'validation_error', message: body.error.errors[0].message })
+    if (!body.success) return reply.status(400).send({ error: 'validation_error', message: body.error.issues[0].message })
 
     const sesion = await prisma.cajaSesion.findFirst({
       where: { id: req.params.id, tenantId: req.tenantId },
@@ -281,7 +281,7 @@ export default async function cajaRoutes(fastify) {
     preHandler: [fastify.verifyJWT, fastify.verifyTenant, fastify.requireRole(['ADMIN', 'VENDEDOR', 'CONTADOR'])],
   }, async (req, reply) => {
     const body = notaCreditoSchema.safeParse(req.body)
-    if (!body.success) return reply.status(400).send({ error: 'validation_error', message: body.error.errors[0].message })
+    if (!body.success) return reply.status(400).send({ error: 'validation_error', message: body.error.issues[0].message })
     const d = body.data
 
     const sesion = await prisma.cajaSesion.findFirst({
@@ -381,7 +381,7 @@ export default async function cajaRoutes(fastify) {
   // tocan los campos financieros, la sesión ya cerrada queda intacta salvo esto.
   fastify.put('/caja/:id/comentario', auth, async (req, reply) => {
     const body = comentarioSchema.safeParse(req.body)
-    if (!body.success) return reply.status(400).send({ error: 'validation_error', message: body.error.errors[0].message })
+    if (!body.success) return reply.status(400).send({ error: 'validation_error', message: body.error.issues[0].message })
 
     const sesion = await prisma.cajaSesion.findFirst({ where: { id: req.params.id, tenantId: req.tenantId } })
     if (!sesion) return reply.status(404).send({ error: 'not_found', message: 'Sesión de caja no encontrada.' })

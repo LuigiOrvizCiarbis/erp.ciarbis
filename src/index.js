@@ -8,6 +8,7 @@ import rateLimit from '@fastify/rate-limit'
 import multipart from '@fastify/multipart'
 import { authPlugin } from './plugins/auth.js'
 import { tenantPlugin } from './plugins/tenant.js'
+import './lib/zodUtil.js' // Zod 4: mensajes de validación en español (z.config global)
 import authRoutes from './routes/v1/auth.js'
 import productosRoutes from './routes/v1/productos.js'
 import clientesRoutes from './routes/v1/clientes.js'

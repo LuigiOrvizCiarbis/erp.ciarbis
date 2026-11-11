@@ -89,7 +89,7 @@ export default async function authRoutes(fastify) {
   }, async (req, reply) => {
     const body = loginSchema.safeParse(req.body)
     if (!body.success) {
-      return reply.status(400).send({ error: 'validation_error', message: body.error.errors[0].message })
+      return reply.status(400).send({ error: 'validation_error', message: body.error.issues[0].message })
     }
 
     const { email, password } = body.data
@@ -206,7 +206,7 @@ export default async function authRoutes(fastify) {
   fastify.post('/auth/register', async (req, reply) => {
     const body = registerSchema.safeParse(req.body)
     if (!body.success) {
-      return reply.status(400).send({ error: 'validation_error', message: body.error.errors[0].message })
+      return reply.status(400).send({ error: 'validation_error', message: body.error.issues[0].message })
     }
 
     const { empresa, cuit, rubro, modulos, nombre, email, password } = body.data
@@ -326,7 +326,7 @@ export default async function authRoutes(fastify) {
   }, async (req, reply) => {
     const body = forgotSchema.safeParse(req.body)
     if (!body.success) {
-      return reply.status(400).send({ error: 'validation_error', message: body.error.errors[0].message })
+      return reply.status(400).send({ error: 'validation_error', message: body.error.issues[0].message })
     }
 
     const user = await prisma.user.findFirst({ where: { email: body.data.email.toLowerCase() } })
@@ -358,7 +358,7 @@ export default async function authRoutes(fastify) {
   fastify.post('/auth/reset-password', async (req, reply) => {
     const body = resetSchema.safeParse(req.body)
     if (!body.success) {
-      return reply.status(400).send({ error: 'validation_error', message: body.error.errors[0].message })
+      return reply.status(400).send({ error: 'validation_error', message: body.error.issues[0].message })
     }
 
     const { token, password } = body.data

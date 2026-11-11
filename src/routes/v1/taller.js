@@ -6,6 +6,7 @@
 // ─────────────────────────────────────────────────────────────
 
 import { z } from 'zod'
+import { parcial } from '../../lib/zodUtil.js'
 import { prisma } from '../../lib/prisma.js'
 import { tituloCase } from '../../lib/textUtils.js'
 import { registrarAuditoria } from '../../lib/auditoria.js'
@@ -192,7 +193,7 @@ export default async function tallerRoutes(fastify) {
   // con el mismo teléfono/DNI o se crea uno nuevo (todo el que deja un equipo es un cliente).
   fastify.post('/taller/ordenes', auth, async (req, reply) => {
     const body = ordenSchema.safeParse(req.body)
-    if (!body.success) return reply.status(400).send({ error: 'validation_error', message: body.error.errors[0]?.message, details: body.error.flatten() })
+    if (!body.success) return reply.status(400).send({ error: 'validation_error', message: body.error.issues[0]?.message, details: body.error.flatten() })
     const d = body.data
     const nombre = tituloCase(d.clienteNombre.trim())
 
@@ -258,8 +259,8 @@ export default async function tallerRoutes(fastify) {
 
   // ── PUT /taller/ordenes/:id ── editar datos del ingreso (no toca estado/presupuesto/entrega)
   fastify.put('/taller/ordenes/:id', auth, async (req, reply) => {
-    const body = ordenSchema.partial().safeParse(req.body)
-    if (!body.success) return reply.status(400).send({ error: 'validation_error', message: body.error.errors[0]?.message })
+    const body = parcial(ordenSchema).safeParse(req.body)
+    if (!body.success) return reply.status(400).send({ error: 'validation_error', message: body.error.issues[0]?.message })
     const orden = await ordenDelTenant(req, reply); if (!orden) return
     const d = body.data
     const data = {}

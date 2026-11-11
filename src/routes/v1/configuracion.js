@@ -4,6 +4,7 @@
 // ─────────────────────────────────────────────────────────────
 
 import { z } from 'zod'
+import { parcial } from '../../lib/zodUtil.js'
 import bcrypt from 'bcryptjs'
 import { prisma } from '../../lib/prisma.js'
 import { invalidarCacheAuth } from '../../lib/authCache.js'
@@ -89,7 +90,7 @@ export default async function configuracionRoutes(fastify) {
   // ── PUT /configuracion/empresa ────────────────────────────
   fastify.put('/configuracion/empresa', adminOnly, async (req, reply) => {
     const body = tenantSchema.safeParse(req.body)
-    if (!body.success) return reply.status(400).send({ error: 'validation_error', message: body.error.errors[0].message })
+    if (!body.success) return reply.status(400).send({ error: 'validation_error', message: body.error.issues[0].message })
 
     const tenant = await prisma.tenant.update({
       where: { id: req.tenantId },
@@ -132,7 +133,7 @@ export default async function configuracionRoutes(fastify) {
 
   fastify.post('/configuracion/sucursales', adminOnly, async (req, reply) => {
     const body = sucursalSchema.safeParse(req.body)
-    if (!body.success) return reply.status(400).send({ error: 'validation_error', message: body.error.errors[0].message })
+    if (!body.success) return reply.status(400).send({ error: 'validation_error', message: body.error.issues[0].message })
     body.data.nombre = tituloCase(body.data.nombre)
 
     const existe = await prisma.sucursal.findFirst({ where: { tenantId: req.tenantId, nombre: { equals: body.data.nombre, mode: 'insensitive' } } })
@@ -143,8 +144,8 @@ export default async function configuracionRoutes(fastify) {
   })
 
   fastify.put('/configuracion/sucursales/:id', adminOnly, async (req, reply) => {
-    const body = sucursalSchema.partial().safeParse(req.body)
-    if (!body.success) return reply.status(400).send({ error: 'validation_error', message: body.error.errors[0].message })
+    const body = parcial(sucursalSchema).safeParse(req.body)
+    if (!body.success) return reply.status(400).send({ error: 'validation_error', message: body.error.issues[0].message })
     if (body.data.nombre) {
       body.data.nombre = tituloCase(body.data.nombre)
       const existe = await prisma.sucursal.findFirst({ where: { tenantId: req.tenantId, nombre: { equals: body.data.nombre, mode: 'insensitive' }, id: { not: req.params.id } } })
@@ -190,7 +191,7 @@ export default async function configuracionRoutes(fastify) {
 
   fastify.post('/configuracion/razones-sociales', adminOnly, async (req, reply) => {
     const body = razonSocialSchema.safeParse(req.body)
-    if (!body.success) return reply.status(400).send({ error: 'validation_error', message: body.error.errors[0].message })
+    if (!body.success) return reply.status(400).send({ error: 'validation_error', message: body.error.issues[0].message })
     body.data.nombre = tituloCase(body.data.nombre)
 
     const existe = await prisma.razonSocial.findFirst({ where: { tenantId: req.tenantId, cuit: body.data.cuit } })
@@ -201,8 +202,8 @@ export default async function configuracionRoutes(fastify) {
   })
 
   fastify.put('/configuracion/razones-sociales/:id', adminOnly, async (req, reply) => {
-    const body = razonSocialSchema.partial().safeParse(req.body)
-    if (!body.success) return reply.status(400).send({ error: 'validation_error', message: body.error.errors[0].message })
+    const body = parcial(razonSocialSchema).safeParse(req.body)
+    if (!body.success) return reply.status(400).send({ error: 'validation_error', message: body.error.issues[0].message })
     if (body.data.nombre) body.data.nombre = tituloCase(body.data.nombre)
 
     const r = await prisma.razonSocial.updateMany({

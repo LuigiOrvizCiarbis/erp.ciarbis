@@ -70,7 +70,7 @@ export default async function cotizacionDolarRoutes(fastify) {
   // usuario aprieta "Actualizar" o edita un campo / elige un default a mano.
   fastify.put('/cotizacion-dolar', adminOnly, async (req, reply) => {
     const body = cotizacionSchema.safeParse(req.body)
-    if (!body.success) return reply.status(400).send({ error: 'validation_error', message: body.error.errors[0].message })
+    if (!body.success) return reply.status(400).send({ error: 'validation_error', message: body.error.issues[0].message })
     await asegurarCotizacion(req.tenantId)
     invalidarCotizacion(req.tenantId) // los precios en dólares se recalculan con el valor nuevo
     return prisma.cotizacionDolar.update({

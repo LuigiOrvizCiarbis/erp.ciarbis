@@ -52,7 +52,7 @@ export default async function rolesRoutes(fastify) {
   // ── POST /roles ── siempre custom (esSistema=false) ────────
   fastify.post('/roles', adminOnly, async (req, reply) => {
     const body = crearSchema.safeParse(req.body)
-    if (!body.success) return reply.status(400).send({ error: 'validation_error', message: body.error.errors[0].message })
+    if (!body.success) return reply.status(400).send({ error: 'validation_error', message: body.error.issues[0].message })
     const nombre = tituloCase(body.data.nombre)
 
     const existe = await prisma.rol.findFirst({ where: { tenantId: req.tenantId, nombre: { equals: nombre, mode: 'insensitive' } } })
@@ -67,7 +67,7 @@ export default async function rolesRoutes(fastify) {
   // ── PUT /roles/:id ── sólo roles custom (los de sistema no se editan, se duplican) ──
   fastify.put('/roles/:id', adminOnly, async (req, reply) => {
     const body = actualizarSchema.safeParse(req.body)
-    if (!body.success) return reply.status(400).send({ error: 'validation_error', message: body.error.errors[0].message })
+    if (!body.success) return reply.status(400).send({ error: 'validation_error', message: body.error.issues[0].message })
 
     const rol = await prisma.rol.findFirst({ where: { id: req.params.id, tenantId: req.tenantId } })
     if (!rol) return reply.status(404).send({ error: 'not_found', message: 'Rol no encontrado.' })

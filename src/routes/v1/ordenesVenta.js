@@ -126,7 +126,7 @@ export default async function ordenesVentaRoutes(fastify) {
     preHandler: [fastify.verifyJWT, fastify.verifyTenant, fastify.requireRole(['ADMIN', 'VENDEDOR'])],
   }, async (req, reply) => {
     const body = ordenSchema.safeParse(req.body)
-    if (!body.success) return reply.status(400).send({ error: 'validation_error', message: body.error.errors[0].message })
+    if (!body.success) return reply.status(400).send({ error: 'validation_error', message: body.error.issues[0].message })
 
     const nro = await getNextNro(req.tenantId)
     const { lineas, ...ordenData } = body.data
@@ -226,7 +226,7 @@ export default async function ordenesVentaRoutes(fastify) {
     preHandler: [fastify.verifyJWT, fastify.verifyTenant, fastify.requireRole(['ADMIN'])],
   }, async (req, reply) => {
     const body = z.object({ lineas: z.array(lineaSchema).min(1, 'Se requiere al menos una línea') }).safeParse(req.body)
-    if (!body.success) return reply.status(400).send({ error: 'validation_error', message: body.error.errors[0].message })
+    if (!body.success) return reply.status(400).send({ error: 'validation_error', message: body.error.issues[0].message })
 
     const orden = await prisma.ordenVenta.findFirst({
       where: { id: req.params.id, tenantId: req.tenantId },

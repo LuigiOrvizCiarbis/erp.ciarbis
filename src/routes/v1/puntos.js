@@ -8,6 +8,7 @@
 // ─────────────────────────────────────────────────────────────
 
 import { z } from 'zod'
+import { parcial } from '../../lib/zodUtil.js'
 import { prisma } from '../../lib/prisma.js'
 
 const configSchema = z.object({
@@ -95,7 +96,7 @@ export default async function puntosRoutes(fastify) {
 
   fastify.put('/configuracion/puntos', adminOnly, async (req, reply) => {
     const body = configSchema.safeParse(req.body)
-    if (!body.success) return reply.status(400).send({ error: 'validation_error', message: body.error.errors[0].message })
+    if (!body.success) return reply.status(400).send({ error: 'validation_error', message: body.error.issues[0].message })
     await getOrCrearConfig(req.tenantId)
     const item = await prisma.configuracionPuntos.update({ where: { tenantId: req.tenantId }, data: body.data })
     return item
@@ -126,7 +127,7 @@ export default async function puntosRoutes(fastify) {
 
   fastify.post('/reglas-bonus-puntos', adminOnly, async (req, reply) => {
     const body = reglaSchema.safeParse(req.body)
-    if (!body.success) return reply.status(400).send({ error: 'validation_error', message: body.error.errors[0].message })
+    if (!body.success) return reply.status(400).send({ error: 'validation_error', message: body.error.issues[0].message })
     const where = reglaDuplicadaWhere(req.tenantId, body.data)
     if (where) {
       const existe = await prisma.reglaBonusPuntos.findFirst({ where })
@@ -137,8 +138,8 @@ export default async function puntosRoutes(fastify) {
   })
 
   fastify.put('/reglas-bonus-puntos/:id', adminOnly, async (req, reply) => {
-    const body = reglaSchema.partial().safeParse(req.body)
-    if (!body.success) return reply.status(400).send({ error: 'validation_error', message: body.error.errors[0].message })
+    const body = parcial(reglaSchema).safeParse(req.body)
+    if (!body.success) return reply.status(400).send({ error: 'validation_error', message: body.error.issues[0].message })
     const r = await prisma.reglaBonusPuntos.updateMany({ where: { id: req.params.id, tenantId: req.tenantId }, data: body.data })
     if (r.count === 0) return reply.status(404).send({ error: 'not_found', message: 'Regla no encontrada.' })
     return prisma.reglaBonusPuntos.findUnique({ where: { id: req.params.id } })

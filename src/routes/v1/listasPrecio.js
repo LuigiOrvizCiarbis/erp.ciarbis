@@ -43,7 +43,7 @@ export default async function listasPrecioRoutes(fastify) {
 
   fastify.post('/listas-precio', adminOnly, async (req, reply) => {
     const body = listaSchema.safeParse(req.body)
-    if (!body.success) return reply.status(400).send({ error: 'validation_error', message: body.error.errors[0].message })
+    if (!body.success) return reply.status(400).send({ error: 'validation_error', message: body.error.issues[0].message })
     const nombre = tituloCase(body.data.nombre)
     const existe = await prisma.listaPrecio.findFirst({ where: { tenantId: req.tenantId, nombre: { equals: nombre, mode: 'insensitive' } } })
     if (existe) return reply.status(409).send({ error: 'nombre_duplicado', message: 'Ya existe una lista de precios con ese nombre.' })
@@ -84,7 +84,7 @@ export default async function listasPrecioRoutes(fastify) {
   // ── Margen por categoría dentro de una lista ──────────────
   fastify.put('/listas-precio/:id/margenes', adminOnly, async (req, reply) => {
     const body = margenSchema.safeParse(req.body)
-    if (!body.success) return reply.status(400).send({ error: 'validation_error', message: body.error.errors[0].message })
+    if (!body.success) return reply.status(400).send({ error: 'validation_error', message: body.error.issues[0].message })
     const lista = await prisma.listaPrecio.findFirst({ where: { id: req.params.id, tenantId: req.tenantId } })
     if (!lista) return reply.status(404).send({ error: 'not_found', message: 'Lista de precios no encontrada.' })
 

@@ -3,6 +3,7 @@
 // ─────────────────────────────────────────────────────────────
 
 import { z } from 'zod'
+import { parcial } from '../../lib/zodUtil.js'
 import { prisma } from '../../lib/prisma.js'
 import { asegurarListaDefault } from './listasPrecio.js'
 import { tituloCase } from '../../lib/textUtils.js'
@@ -190,7 +191,7 @@ export default async function clientesRoutes(fastify) {
     preHandler: [fastify.verifyJWT, fastify.verifyTenant, fastify.requireRole(['ADMIN', 'VENDEDOR'])],
   }, async (req, reply) => {
     const body = clienteSchema.safeParse(req.body)
-    if (!body.success) return reply.status(400).send({ error: 'validation_error', message: body.error.errors[0].message })
+    if (!body.success) return reply.status(400).send({ error: 'validation_error', message: body.error.issues[0].message })
     body.data.nombre = tituloCase(body.data.nombre)
     const { nombre, tel, email } = body.data
     // Guarda contra doble-submit (doble click, doble tap) que crea el mismo cliente 2 veces:
@@ -215,8 +216,8 @@ export default async function clientesRoutes(fastify) {
   fastify.put('/clientes/:id', {
     preHandler: [fastify.verifyJWT, fastify.verifyTenant, fastify.requireRole(['ADMIN', 'VENDEDOR'])],
   }, async (req, reply) => {
-    const body = clienteSchema.partial().safeParse(req.body)
-    if (!body.success) return reply.status(400).send({ error: 'validation_error', message: body.error.errors[0].message })
+    const body = parcial(clienteSchema).safeParse(req.body)
+    if (!body.success) return reply.status(400).send({ error: 'validation_error', message: body.error.issues[0].message })
     if (body.data.nombre) body.data.nombre = tituloCase(body.data.nombre)
 
     // El cliente "Consumidor Final" tiene que seguir existiendo siempre — no se puede pausar
@@ -264,7 +265,7 @@ export default async function clientesRoutes(fastify) {
     preHandler: [fastify.verifyJWT, fastify.verifyTenant, fastify.requireRole(['ADMIN', 'VENDEDOR'])],
   }, async (req, reply) => {
     const body = pagoCtaCteSchema.safeParse(req.body)
-    if (!body.success) return reply.status(400).send({ error: 'validation_error', message: body.error.errors[0].message })
+    if (!body.success) return reply.status(400).send({ error: 'validation_error', message: body.error.issues[0].message })
     const { formaPago, cajaSesionId, monto, comentario, cotizacionOverride } = body.data
 
     const cliente = await prisma.cliente.findFirst({ where: { id: req.params.id, tenantId: req.tenantId } })
@@ -352,7 +353,7 @@ export default async function clientesRoutes(fastify) {
     preHandler: [fastify.verifyJWT, fastify.verifyTenant, fastify.requireRole(['ADMIN', 'VENDEDOR'])],
   }, async (req, reply) => {
     const body = planClienteSchema.safeParse(req.body)
-    if (!body.success) return reply.status(400).send({ error: 'validation_error', message: body.error.errors[0].message })
+    if (!body.success) return reply.status(400).send({ error: 'validation_error', message: body.error.issues[0].message })
     const cliente = await prisma.cliente.findFirst({ where: { id: req.params.id, tenantId: req.tenantId } })
     if (!cliente) return reply.status(404).send({ error: 'not_found', message: 'Cliente no encontrado.' })
     const plan = await prisma.planCliente.create({
@@ -364,8 +365,8 @@ export default async function clientesRoutes(fastify) {
   fastify.put('/clientes/planes/:planId', {
     preHandler: [fastify.verifyJWT, fastify.verifyTenant, fastify.requireRole(['ADMIN', 'VENDEDOR'])],
   }, async (req, reply) => {
-    const body = planClienteSchema.partial().safeParse(req.body)
-    if (!body.success) return reply.status(400).send({ error: 'validation_error', message: body.error.errors[0].message })
+    const body = parcial(planClienteSchema).safeParse(req.body)
+    if (!body.success) return reply.status(400).send({ error: 'validation_error', message: body.error.issues[0].message })
     const { proximoVencimiento, ...resto } = body.data
     const r = await prisma.planCliente.updateMany({
       where: { id: req.params.planId, tenantId: req.tenantId },
@@ -397,7 +398,7 @@ export default async function clientesRoutes(fastify) {
     const plan = await prisma.planCliente.findFirst({ where: { id: req.params.planId, tenantId: req.tenantId } })
     if (!plan) return reply.status(404).send({ error: 'not_found', message: 'Plan no encontrado.' })
     const body = pagoPlanSchema.safeParse(req.body)
-    if (!body.success) return reply.status(400).send({ error: 'validation_error', message: body.error.errors[0].message })
+    if (!body.success) return reply.status(400).send({ error: 'validation_error', message: body.error.issues[0].message })
     const { monto, periodosCubiertos, medioPagoId, cotizacionAplicada, comprobantePdf, cotizacionOverride } = body.data
     const fechaPago = normalizarFechaISO(body.data.fecha) ? new Date(normalizarFechaISO(body.data.fecha)) : new Date()
 
@@ -452,7 +453,7 @@ export default async function clientesRoutes(fastify) {
       frecuenciaDias: z.number().int().positive().default(30),
     })
     const body = schema.safeParse(req.body)
-    if (!body.success) return reply.status(400).send({ error: 'validation_error', message: body.error.errors[0].message })
+    if (!body.success) return reply.status(400).send({ error: 'validation_error', message: body.error.issues[0].message })
     const template = await prisma.planTemplate.create({ data: { tenantId: req.tenantId, ...body.data } })
     return reply.status(201).send(template)
   })
@@ -468,7 +469,7 @@ export default async function clientesRoutes(fastify) {
       activo: z.boolean().optional(),
     })
     const body = schema.safeParse(req.body)
-    if (!body.success) return reply.status(400).send({ error: 'validation_error', message: body.error.errors[0].message })
+    if (!body.success) return reply.status(400).send({ error: 'validation_error', message: body.error.issues[0].message })
     const r = await prisma.planTemplate.updateMany({ where: { id: req.params.id, tenantId: req.tenantId }, data: body.data })
     if (r.count === 0) return reply.status(404).send({ error: 'not_found', message: 'Plantilla no encontrada.' })
     return prisma.planTemplate.findUnique({ where: { id: req.params.id } })

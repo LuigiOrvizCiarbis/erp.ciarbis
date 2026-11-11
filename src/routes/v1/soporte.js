@@ -17,7 +17,7 @@ export default async function soporteRoutes(fastify) {
   // ── POST /soporte/tickets ──────────────────────────────────
   fastify.post('/soporte/tickets', auth, async (req, reply) => {
     const body = ticketSchema.safeParse(req.body)
-    if (!body.success) return reply.status(400).send({ error: 'validation_error', message: body.error.errors[0].message })
+    if (!body.success) return reply.status(400).send({ error: 'validation_error', message: body.error.issues[0].message })
 
     const ticket = await prisma.ticketSoporte.create({
       data: { tenantId: req.tenantId, userId: req.user.id, mensaje: body.data.mensaje },

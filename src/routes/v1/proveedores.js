@@ -3,6 +3,7 @@
 // ─────────────────────────────────────────────────────────────
 
 import { z } from 'zod'
+import { parcial } from '../../lib/zodUtil.js'
 import { prisma } from '../../lib/prisma.js'
 import { registrarMovimientoCuentaInterna, validarCajaParaPago } from '../../lib/cuentasInternas.js'
 import { tituloCase } from '../../lib/textUtils.js'
@@ -66,7 +67,7 @@ export default async function proveedoresRoutes(fastify) {
     preHandler: [fastify.verifyJWT, fastify.verifyTenant, fastify.requireRole(['ADMIN', 'DEPOSITO'])],
   }, async (req, reply) => {
     const body = proveedorSchema.safeParse(req.body)
-    if (!body.success) return reply.status(400).send({ error: 'validation_error', message: body.error.errors[0].message })
+    if (!body.success) return reply.status(400).send({ error: 'validation_error', message: body.error.issues[0].message })
     body.data.nombre = tituloCase(body.data.nombre)
     const { nombre, cuit, tel, email } = body.data
     // Guarda contra doble-submit (doble click) que crea el mismo proveedor 2 veces — mismo
@@ -98,8 +99,8 @@ export default async function proveedoresRoutes(fastify) {
   fastify.put('/proveedores/:id', {
     preHandler: [fastify.verifyJWT, fastify.verifyTenant, fastify.requireRole(['ADMIN', 'DEPOSITO'])],
   }, async (req, reply) => {
-    const body = proveedorSchema.partial().safeParse(req.body)
-    if (!body.success) return reply.status(400).send({ error: 'validation_error', message: body.error.errors[0].message })
+    const body = parcial(proveedorSchema).safeParse(req.body)
+    if (!body.success) return reply.status(400).send({ error: 'validation_error', message: body.error.issues[0].message })
     if (body.data.nombre) body.data.nombre = tituloCase(body.data.nombre)
     const r = await prisma.proveedor.updateMany({ where: { id: req.params.id, tenantId: req.tenantId }, data: body.data })
     if (r.count === 0) return reply.status(404).send({ error: 'not_found', message: 'Proveedor no encontrado.' })
@@ -132,7 +133,7 @@ export default async function proveedoresRoutes(fastify) {
     preHandler: [fastify.verifyJWT, fastify.verifyTenant, fastify.requireRole(['ADMIN', 'VENDEDOR'])],
   }, async (req, reply) => {
     const body = pagoProveedorSchema.safeParse(req.body)
-    if (!body.success) return reply.status(400).send({ error: 'validation_error', message: body.error.errors[0].message })
+    if (!body.success) return reply.status(400).send({ error: 'validation_error', message: body.error.issues[0].message })
     const { formaPago, cajaSesionId, monto, comentario, cotizacionOverride } = body.data
 
     const proveedor = await prisma.proveedor.findFirst({ where: { id: req.params.id, tenantId: req.tenantId } })

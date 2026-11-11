@@ -4,6 +4,7 @@
 // ─────────────────────────────────────────────────────────────
 
 import { z } from 'zod'
+import { parcial } from '../../lib/zodUtil.js'
 import { prisma } from '../../lib/prisma.js'
 import { tituloCase } from '../../lib/textUtils.js'
 
@@ -102,7 +103,7 @@ export default async function crmRoutes(fastify) {
 
   fastify.post('/crm/contactos', auth, async (req, reply) => {
     const body = contactoSchema.safeParse(req.body)
-    if (!body.success) return reply.status(400).send({ error: 'validation_error', message: body.error.errors[0].message })
+    if (!body.success) return reply.status(400).send({ error: 'validation_error', message: body.error.issues[0].message })
     body.data.nombre = tituloCase(body.data.nombre)
     const { nombre, tel, email } = body.data
     // Guarda contra doble-submit — mismo criterio que clientes.js/proveedores.js.
@@ -123,8 +124,8 @@ export default async function crmRoutes(fastify) {
   })
 
   fastify.put('/crm/contactos/:id', auth, async (req, reply) => {
-    const body = contactoSchema.partial().safeParse(req.body)
-    if (!body.success) return reply.status(400).send({ error: 'validation_error', message: body.error.errors[0].message })
+    const body = parcial(contactoSchema).safeParse(req.body)
+    if (!body.success) return reply.status(400).send({ error: 'validation_error', message: body.error.issues[0].message })
     if (body.data.nombre) body.data.nombre = tituloCase(body.data.nombre)
     const r = await prisma.contacto.updateMany({ where: { id: req.params.id, tenantId: req.tenantId }, data: body.data })
     if (r.count === 0) return reply.status(404).send({ error: 'not_found', message: 'Contacto no encontrado.' })
@@ -159,7 +160,7 @@ export default async function crmRoutes(fastify) {
   // Legacy — el Dashboard todavía usa el campo `etapa` (enum fijo) para el funnel-chart.
   fastify.patch('/crm/contactos/:id/etapa', auth, async (req, reply) => {
     const body = etapaSchema.safeParse(req.body)
-    if (!body.success) return reply.status(400).send({ error: 'validation_error', message: body.error.errors[0].message })
+    if (!body.success) return reply.status(400).send({ error: 'validation_error', message: body.error.issues[0].message })
     const r = await prisma.contacto.updateMany({ where: { id: req.params.id, tenantId: req.tenantId }, data: { etapa: body.data.etapa } })
     if (r.count === 0) return reply.status(404).send({ error: 'not_found', message: 'Contacto no encontrado.' })
     return { message: 'Etapa actualizada.' }
@@ -169,7 +170,7 @@ export default async function crmRoutes(fastify) {
   // destino, así el frontend solo manda el id de la columna donde soltó la card.
   fastify.patch('/crm/contactos/:id/embudo', auth, async (req, reply) => {
     const body = embudoMoverSchema.safeParse(req.body)
-    if (!body.success) return reply.status(400).send({ error: 'validation_error', message: body.error.errors[0].message })
+    if (!body.success) return reply.status(400).send({ error: 'validation_error', message: body.error.issues[0].message })
     const etapaDestino = await prisma.etapaEmbudoCustom.findFirst({ where: { id: body.data.etapaCustomId, tenantId: req.tenantId } })
     if (!etapaDestino) return reply.status(404).send({ error: 'not_found', message: 'Etapa no encontrada.' })
     const r = await prisma.contacto.updateMany({
@@ -190,7 +191,7 @@ export default async function crmRoutes(fastify) {
 
   fastify.post('/crm/contactos/:id/notas', auth, async (req, reply) => {
     const body = notaSchema.safeParse(req.body)
-    if (!body.success) return reply.status(400).send({ error: 'validation_error', message: body.error.errors[0].message })
+    if (!body.success) return reply.status(400).send({ error: 'validation_error', message: body.error.issues[0].message })
     const contacto = await prisma.contacto.findFirst({ where: { id: req.params.id, tenantId: req.tenantId } })
     if (!contacto) return reply.status(404).send({ error: 'not_found', message: 'Contacto no encontrado.' })
     const nota = await prisma.notaContacto.create({
@@ -206,7 +207,7 @@ export default async function crmRoutes(fastify) {
 
   fastify.post('/crm/campos-custom', auth, async (req, reply) => {
     const body = campoCustomSchema.safeParse(req.body)
-    if (!body.success) return reply.status(400).send({ error: 'validation_error', message: body.error.errors[0].message })
+    if (!body.success) return reply.status(400).send({ error: 'validation_error', message: body.error.issues[0].message })
     const existente = await prisma.campoCustomContacto.findFirst({ where: { tenantId: req.tenantId, clave: body.data.clave } })
     if (existente) return reply.status(409).send({ error: 'clave_duplicada', message: 'Ya existe un campo con esa clave.' })
     const max = await prisma.campoCustomContacto.aggregate({ where: { tenantId: req.tenantId }, _max: { orden: true } })
@@ -215,8 +216,8 @@ export default async function crmRoutes(fastify) {
   })
 
   fastify.put('/crm/campos-custom/:id', auth, async (req, reply) => {
-    const body = campoCustomSchema.partial().safeParse(req.body)
-    if (!body.success) return reply.status(400).send({ error: 'validation_error', message: body.error.errors[0].message })
+    const body = parcial(campoCustomSchema).safeParse(req.body)
+    if (!body.success) return reply.status(400).send({ error: 'validation_error', message: body.error.issues[0].message })
     const r = await prisma.campoCustomContacto.updateMany({ where: { id: req.params.id, tenantId: req.tenantId }, data: body.data })
     if (r.count === 0) return reply.status(404).send({ error: 'not_found', message: 'Campo no encontrado.' })
     return prisma.campoCustomContacto.findUnique({ where: { id: req.params.id } })
@@ -242,7 +243,7 @@ export default async function crmRoutes(fastify) {
 
   fastify.post('/crm/etiquetas', auth, async (req, reply) => {
     const body = etiquetaSchema.safeParse(req.body)
-    if (!body.success) return reply.status(400).send({ error: 'validation_error', message: body.error.errors[0].message })
+    if (!body.success) return reply.status(400).send({ error: 'validation_error', message: body.error.issues[0].message })
     const existente = await prisma.etiqueta.findFirst({ where: { tenantId: req.tenantId, nombre: body.data.nombre } })
     if (existente) return reply.status(409).send({ error: 'nombre_duplicado', message: 'Ya existe una etiqueta con ese nombre.' })
     const etiqueta = await prisma.etiqueta.create({ data: { tenantId: req.tenantId, ...body.data } })
@@ -250,8 +251,8 @@ export default async function crmRoutes(fastify) {
   })
 
   fastify.put('/crm/etiquetas/:id', auth, async (req, reply) => {
-    const body = etiquetaSchema.partial().safeParse(req.body)
-    if (!body.success) return reply.status(400).send({ error: 'validation_error', message: body.error.errors[0].message })
+    const body = parcial(etiquetaSchema).safeParse(req.body)
+    if (!body.success) return reply.status(400).send({ error: 'validation_error', message: body.error.issues[0].message })
     const r = await prisma.etiqueta.updateMany({ where: { id: req.params.id, tenantId: req.tenantId }, data: body.data })
     if (r.count === 0) return reply.status(404).send({ error: 'not_found', message: 'Etiqueta no encontrada.' })
     return prisma.etiqueta.findUnique({ where: { id: req.params.id } })
@@ -280,7 +281,7 @@ export default async function crmRoutes(fastify) {
 
   fastify.post('/crm/tareas', auth, async (req, reply) => {
     const body = tareaSchema.safeParse(req.body)
-    if (!body.success) return reply.status(400).send({ error: 'validation_error', message: body.error.errors[0].message })
+    if (!body.success) return reply.status(400).send({ error: 'validation_error', message: body.error.issues[0].message })
     const { fechaInicio, fechaVencimiento, ...resto } = body.data
     const tarea = await prisma.tarea.create({
       data: { tenantId: req.tenantId, ...resto, fechaInicio: fechaInicio ? new Date(fechaInicio) : null, fechaVencimiento: fechaVencimiento ? new Date(fechaVencimiento) : null },
@@ -289,8 +290,8 @@ export default async function crmRoutes(fastify) {
   })
 
   fastify.put('/crm/tareas/:id', auth, async (req, reply) => {
-    const body = tareaSchema.partial().safeParse(req.body)
-    if (!body.success) return reply.status(400).send({ error: 'validation_error', message: body.error.errors[0].message })
+    const body = parcial(tareaSchema).safeParse(req.body)
+    if (!body.success) return reply.status(400).send({ error: 'validation_error', message: body.error.issues[0].message })
     const { fechaInicio, fechaVencimiento, ...resto } = body.data
     const r = await prisma.tarea.updateMany({
       where: { id: req.params.id, tenantId: req.tenantId },
@@ -329,14 +330,14 @@ export default async function crmRoutes(fastify) {
 
   fastify.post('/crm/tipos-embudo', auth, async (req, reply) => {
     const body = tipoEmbudoSchema.safeParse(req.body)
-    if (!body.success) return reply.status(400).send({ error: 'validation_error', message: body.error.errors[0].message })
+    if (!body.success) return reply.status(400).send({ error: 'validation_error', message: body.error.issues[0].message })
     const tipo = await prisma.tipoEmbudo.create({ data: { tenantId: req.tenantId, nombre: body.data.nombre } })
     return reply.status(201).send({ ...tipo, etapas: [] })
   })
 
   fastify.put('/crm/tipos-embudo/:id', auth, async (req, reply) => {
-    const body = tipoEmbudoSchema.partial().safeParse(req.body)
-    if (!body.success) return reply.status(400).send({ error: 'validation_error', message: body.error.errors[0].message })
+    const body = parcial(tipoEmbudoSchema).safeParse(req.body)
+    if (!body.success) return reply.status(400).send({ error: 'validation_error', message: body.error.issues[0].message })
     if (body.data.esDefault) {
       await prisma.tipoEmbudo.updateMany({ where: { tenantId: req.tenantId }, data: { esDefault: false } })
     }
@@ -355,7 +356,7 @@ export default async function crmRoutes(fastify) {
 
   fastify.post('/crm/tipos-embudo/:id/etapas', auth, async (req, reply) => {
     const body = etapaEmbudoCustomSchema.safeParse(req.body)
-    if (!body.success) return reply.status(400).send({ error: 'validation_error', message: body.error.errors[0].message })
+    if (!body.success) return reply.status(400).send({ error: 'validation_error', message: body.error.issues[0].message })
     const tipo = await prisma.tipoEmbudo.findFirst({ where: { id: req.params.id, tenantId: req.tenantId } })
     if (!tipo) return reply.status(404).send({ error: 'not_found', message: 'Pipeline no encontrado.' })
     const max = await prisma.etapaEmbudoCustom.aggregate({ where: { tipoEmbudoId: tipo.id }, _max: { orden: true } })
@@ -366,8 +367,8 @@ export default async function crmRoutes(fastify) {
   })
 
   fastify.put('/crm/etapas-embudo/:id', auth, async (req, reply) => {
-    const body = etapaEmbudoCustomSchema.partial().safeParse(req.body)
-    if (!body.success) return reply.status(400).send({ error: 'validation_error', message: body.error.errors[0].message })
+    const body = parcial(etapaEmbudoCustomSchema).safeParse(req.body)
+    if (!body.success) return reply.status(400).send({ error: 'validation_error', message: body.error.issues[0].message })
     const r = await prisma.etapaEmbudoCustom.updateMany({ where: { id: req.params.id, tenantId: req.tenantId }, data: body.data })
     if (r.count === 0) return reply.status(404).send({ error: 'not_found', message: 'Etapa no encontrada.' })
     return prisma.etapaEmbudoCustom.findUnique({ where: { id: req.params.id } })

@@ -271,7 +271,7 @@ export default async function produccionRoutes(fastify) {
     const body = z.array(z.object({
       id: z.string().optional(), nombre: z.string().trim().min(1, 'Cada etapa necesita un nombre').max(40), color: z.string().max(20).optional(),
     })).max(20, 'Máximo 20 etapas').safeParse(req.body?.etapas)
-    if (!body.success) throw new HttpError(400, body.error.errors[0].message)
+    if (!body.success) throw new HttpError(400, body.error.issues[0].message)
     const actuales = await prisma.etapaProduccion.findMany({ where: { tenantId: req.tenantId, activa: true } })
     const idsActuales = new Set(actuales.map((e) => e.id))
     await prisma.$transaction(async (tx) => {
@@ -343,7 +343,7 @@ export default async function produccionRoutes(fastify) {
 
   fastify.post('/produccion/recetas', auth, h(async (req, reply) => {
     const body = recetaSchema.safeParse(req.body)
-    if (!body.success) throw new HttpError(400, body.error.errors[0].message)
+    if (!body.success) throw new HttpError(400, body.error.issues[0].message)
     const mp = await validarReceta(req, body.data)
     const r = await prisma.bOM.create({
       data: { tenantId: req.tenantId, ...recetaData(body.data, mp), version: String(Date.now()), items: { create: itemsData(body.data, mp) } },
@@ -356,7 +356,7 @@ export default async function produccionRoutes(fastify) {
   fastify.put('/produccion/recetas/:id', auth, h(async (req) => {
     await recetaDelTenant(req.tenantId, req.params.id)
     const body = recetaSchema.safeParse(req.body)
-    if (!body.success) throw new HttpError(400, body.error.errors[0].message)
+    if (!body.success) throw new HttpError(400, body.error.issues[0].message)
     const mp = await validarReceta(req, body.data)
     const r = await prisma.$transaction(async (tx) => {
       await tx.bOMItem.deleteMany({ where: { bomId: req.params.id } })
@@ -513,7 +513,7 @@ export default async function produccionRoutes(fastify) {
 
   fastify.post('/produccion/ordenes', auth, h(async (req, reply) => {
     const body = otSchema.safeParse(req.body)
-    if (!body.success) throw new HttpError(400, body.error.errors[0].message)
+    if (!body.success) throw new HttpError(400, body.error.issues[0].message)
     const d = body.data
     const cfg = await leerConfig(req.tenantId)
     const { receta, lineas } = await prepararOT(req, d, cfg)
@@ -559,7 +559,7 @@ export default async function produccionRoutes(fastify) {
     if (b.salidas || b.lineas) {
       if (o.estado !== 'PLANIFICADA') throw new HttpError(409, 'Las cantidades e insumos solo se cambian antes de iniciar la orden.')
       const body = otSchema.safeParse({ ...b, bomId: o.bomId, salidas: b.salidas || [] })
-      if (!body.success) throw new HttpError(400, body.error.errors[0].message)
+      if (!body.success) throw new HttpError(400, body.error.issues[0].message)
       const cfg = await leerConfig(req.tenantId)
       const { lineas } = await prepararOT(req, body.data, cfg)
       if (b.sucursalId !== undefined) data.sucursalId = await resolverSucursalStock(prisma, req.tenantId, b.sucursalId, req.user)
@@ -663,7 +663,7 @@ export default async function produccionRoutes(fastify) {
 
   fastify.post('/produccion/ordenes/:id/completar', auth, h(async (req) => {
     const body = completarSchema.safeParse(req.body || {})
-    if (!body.success) throw new HttpError(400, body.error.errors[0].message)
+    if (!body.success) throw new HttpError(400, body.error.issues[0].message)
     const d = body.data
     let o = await otDelTenant(req.tenantId, req.params.id, { lineas: true, salidas: true, bom: true })
     if (!['PLANIFICADA', 'EN_PROCESO', 'PAUSADA'].includes(o.estado)) throw new HttpError(409, 'La orden ya está cerrada.')

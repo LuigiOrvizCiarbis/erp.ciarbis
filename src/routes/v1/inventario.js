@@ -102,7 +102,7 @@ export default async function inventarioRoutes(fastify) {
     preHandler: [fastify.verifyJWT, fastify.verifyTenant, fastify.requireRole(['ADMIN', 'DEPOSITO'])],
   }, async (req, reply) => {
     const body = ajusteSchema.safeParse(req.body)
-    if (!body.success) return reply.status(400).send({ error: 'validation_error', message: body.error.errors[0].message })
+    if (!body.success) return reply.status(400).send({ error: 'validation_error', message: body.error.issues[0].message })
 
     const { productoId, cantidadNueva, motivo } = body.data
 
@@ -150,7 +150,7 @@ export default async function inventarioRoutes(fastify) {
     preHandler: [fastify.verifyJWT, fastify.verifyTenant, fastify.requireRole(['ADMIN'])],
   }, async (req, reply) => {
     const body = ajusteMasivoSchema.safeParse(req.body)
-    if (!body.success) return reply.status(400).send({ error: 'validation_error', message: body.error.errors[0].message })
+    if (!body.success) return reply.status(400).send({ error: 'validation_error', message: body.error.issues[0].message })
     const { comentario, ajustes } = body.data
     const sucursalId = await resolverSucursalStock(prisma, req.tenantId, body.data.sucursalId, req.user)
 
@@ -233,7 +233,7 @@ export default async function inventarioRoutes(fastify) {
     preHandler: [fastify.verifyJWT, fastify.verifyTenant, fastify.requireRole(['ADMIN', 'DEPOSITO'])],
   }, async (req, reply) => {
     const body = mermaSchema.safeParse(req.body)
-    if (!body.success) return reply.status(400).send({ error: 'validation_error', message: body.error.errors[0].message })
+    if (!body.success) return reply.status(400).send({ error: 'validation_error', message: body.error.issues[0].message })
 
     const { productoId, varianteId, cantidad, motivoCategoria, detalle } = body.data
 
@@ -283,7 +283,7 @@ export default async function inventarioRoutes(fastify) {
     preHandler: [fastify.verifyJWT, fastify.verifyTenant, fastify.requireRole(['ADMIN', 'DEPOSITO'])],
   }, async (req, reply) => {
     const body = transferenciaSchema.safeParse(req.body)
-    if (!body.success) return reply.status(400).send({ error: 'validation_error', message: body.error.errors[0].message })
+    if (!body.success) return reply.status(400).send({ error: 'validation_error', message: body.error.issues[0].message })
     const { origenId, destinoId, comentario, items } = body.data
     if (origenId === destinoId) return reply.status(400).send({ error: 'validation_error', message: 'El origen y el destino tienen que ser sucursales distintas.' })
 

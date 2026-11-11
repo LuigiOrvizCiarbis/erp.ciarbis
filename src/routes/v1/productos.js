@@ -3,6 +3,7 @@
 // ─────────────────────────────────────────────────────────────
 
 import { z } from 'zod'
+import { parcial } from '../../lib/zodUtil.js'
 import * as XLSX from 'xlsx'
 import { prisma } from '../../lib/prisma.js'
 import { registrarAuditoria } from '../../lib/auditoria.js'
@@ -192,7 +193,7 @@ const productoSchema = z.object({
   moneda: z.enum(['ARS', 'USD']).optional(), // moneda de precioCosto/precioVenta (V2.106.0)
 })
 
-const updateSchema = productoSchema.partial()
+const updateSchema = parcial(productoSchema)
 
 const varianteSchema = z.object({
   // {clave: valor} según el catálogo CampoVariante del tenant (ver GET /productos/campos-variante)
@@ -647,7 +648,7 @@ export default async function productosRoutes(fastify) {
   }, async (req, reply) => {
     const body = productoSchema.safeParse(req.body)
     if (!body.success) {
-      return reply.status(400).send({ error: 'validation_error', message: body.error.errors[0].message })
+      return reply.status(400).send({ error: 'validation_error', message: body.error.issues[0].message })
     }
     body.data.nombre = tituloCase(body.data.nombre)
     normalizarUmPorPeso(body.data)
@@ -718,7 +719,7 @@ export default async function productosRoutes(fastify) {
   }, async (req, reply) => {
     const body = updateSchema.safeParse(req.body)
     if (!body.success) {
-      return reply.status(400).send({ error: 'validation_error', message: body.error.errors[0].message })
+      return reply.status(400).send({ error: 'validation_error', message: body.error.issues[0].message })
     }
     normalizarUmPorPeso(body.data)
 
@@ -792,7 +793,7 @@ export default async function productosRoutes(fastify) {
     preHandler: [fastify.verifyJWT, fastify.verifyTenant, fastify.requireRole(['ADMIN', 'DEPOSITO'])],
   }, async (req, reply) => {
     const body = ingresoStockSchema.safeParse(req.body)
-    if (!body.success) return reply.status(400).send({ error: 'validation_error', message: body.error.errors[0].message })
+    if (!body.success) return reply.status(400).send({ error: 'validation_error', message: body.error.issues[0].message })
 
     const producto = await prisma.producto.findFirst({ where: { id: req.params.id, tenantId: req.tenantId } })
     if (!producto) return reply.status(404).send({ error: 'not_found', message: 'Producto no encontrado.' })
@@ -890,7 +891,7 @@ export default async function productosRoutes(fastify) {
     preHandler: [fastify.verifyJWT, fastify.verifyTenant, fastify.requireRole(['ADMIN', 'DEPOSITO'])],
   }, async (req, reply) => {
     const body = bulkSchema.safeParse(req.body)
-    if (!body.success) return reply.status(400).send({ error: 'validation_error', message: body.error.errors[0].message })
+    if (!body.success) return reply.status(400).send({ error: 'validation_error', message: body.error.issues[0].message })
     const { ids, accion, payload } = body.data
 
     if (accion === 'categoria') {
@@ -950,7 +951,7 @@ export default async function productosRoutes(fastify) {
     preHandler: [fastify.verifyJWT, fastify.verifyTenant, fastify.requireRole(['ADMIN', 'DEPOSITO'])],
   }, async (req, reply) => {
     const body = varianteSchema.safeParse(req.body)
-    if (!body.success) return reply.status(400).send({ error: 'validation_error', message: body.error.errors[0].message })
+    if (!body.success) return reply.status(400).send({ error: 'validation_error', message: body.error.issues[0].message })
 
     const producto = await prisma.producto.findFirst({ where: { id: req.params.id, tenantId: req.tenantId } })
     if (!producto) return reply.status(404).send({ error: 'not_found', message: 'Producto no encontrado.' })
@@ -978,8 +979,8 @@ export default async function productosRoutes(fastify) {
   fastify.put('/productos/:id/variantes/:varianteId', {
     preHandler: [fastify.verifyJWT, fastify.verifyTenant, fastify.requireRole(['ADMIN', 'DEPOSITO'])],
   }, async (req, reply) => {
-    const body = varianteSchema.partial().safeParse(req.body)
-    if (!body.success) return reply.status(400).send({ error: 'validation_error', message: body.error.errors[0].message })
+    const body = parcial(varianteSchema).safeParse(req.body)
+    if (!body.success) return reply.status(400).send({ error: 'validation_error', message: body.error.issues[0].message })
 
     // `stock` acá es "lo que hay de esta variante en la sucursal" — se fija con
     // fijarStockSucursal (mueve la diferencia y el total se ajusta solo), nunca pisando el total.
@@ -1067,7 +1068,7 @@ export default async function productosRoutes(fastify) {
     preHandler: [fastify.verifyJWT, fastify.verifyTenant, fastify.requireRole(['ADMIN', 'DEPOSITO'])],
   }, async (req, reply) => {
     const body = campoVarianteSchema.safeParse(req.body)
-    if (!body.success) return reply.status(400).send({ error: 'validation_error', message: body.error.errors[0].message })
+    if (!body.success) return reply.status(400).send({ error: 'validation_error', message: body.error.issues[0].message })
     const clave = slugClave(body.data.label)
     const existe = await prisma.campoVariante.findUnique({ where: { tenantId_clave: { tenantId: req.tenantId, clave } } })
     if (existe) return reply.status(409).send({ error: 'clave_taken', message: 'Ya existe un campo con ese nombre.' })
@@ -1086,7 +1087,7 @@ export default async function productosRoutes(fastify) {
       activo: z.boolean().optional(),
       orden: z.number().int().optional(),
     }).safeParse(req.body)
-    if (!body.success) return reply.status(400).send({ error: 'validation_error', message: body.error.errors[0].message })
+    if (!body.success) return reply.status(400).send({ error: 'validation_error', message: body.error.issues[0].message })
     const r = await prisma.campoVariante.updateMany({ where: { id: req.params.id, tenantId: req.tenantId }, data: body.data })
     if (r.count === 0) return reply.status(404).send({ error: 'not_found', message: 'Campo no encontrado.' })
     return prisma.campoVariante.findUnique({ where: { id: req.params.id } })
@@ -1098,7 +1099,7 @@ export default async function productosRoutes(fastify) {
     preHandler: [fastify.verifyJWT, fastify.verifyTenant, fastify.requireRole(['ADMIN', 'DEPOSITO'])],
   }, async (req, reply) => {
     const body = campoVarianteOpcionSchema.safeParse(req.body)
-    if (!body.success) return reply.status(400).send({ error: 'validation_error', message: body.error.errors[0].message })
+    if (!body.success) return reply.status(400).send({ error: 'validation_error', message: body.error.issues[0].message })
     const campo = await prisma.campoVariante.findFirst({ where: { id: req.params.id, tenantId: req.tenantId } })
     if (!campo) return reply.status(404).send({ error: 'not_found', message: 'Campo no encontrado.' })
     let lista = []
@@ -1115,7 +1116,7 @@ export default async function productosRoutes(fastify) {
     preHandler: [fastify.verifyJWT, fastify.verifyTenant, fastify.requireRole(['ADMIN', 'DEPOSITO'])],
   }, async (req, reply) => {
     const body = bulkCrearVariantesSchema.safeParse(req.body)
-    if (!body.success) return reply.status(400).send({ error: 'validation_error', message: body.error.errors[0].message })
+    if (!body.success) return reply.status(400).send({ error: 'validation_error', message: body.error.issues[0].message })
     const { productoIds, campos } = body.data
 
     const claves = Object.keys(campos).filter(k => Array.isArray(campos[k]) && campos[k].length)
@@ -1212,7 +1213,7 @@ export default async function productosRoutes(fastify) {
     preHandler: [fastify.verifyJWT, fastify.verifyTenant, fastify.requireRole(['ADMIN', 'DEPOSITO'])],
   }, async (req, reply) => {
     const body = confirmarImportSchema.safeParse(req.body)
-    if (!body.success) return reply.status(400).send({ error: 'validation_error', message: body.error.errors[0].message })
+    if (!body.success) return reply.status(400).send({ error: 'validation_error', message: body.error.issues[0].message })
     const { mapeo, filas } = body.data
     const sucursalId = await resolverSucursalStock(prisma, req.tenantId, body.data.sucursalId, req.user)
 
@@ -1498,7 +1499,7 @@ export default async function productosRoutes(fastify) {
     preHandler: [fastify.verifyJWT, fastify.verifyTenant, fastify.requireRole(['ADMIN', 'DEPOSITO'])],
   }, async (req, reply) => {
     const body = productoProveedorSchema.safeParse(req.body)
-    if (!body.success) return reply.status(400).send({ error: 'validation_error', message: body.error.errors[0].message })
+    if (!body.success) return reply.status(400).send({ error: 'validation_error', message: body.error.issues[0].message })
 
     const producto = await prisma.producto.findFirst({ where: { id: req.params.id, tenantId: req.tenantId } })
     if (!producto) return reply.status(404).send({ error: 'not_found', message: 'Producto no encontrado.' })

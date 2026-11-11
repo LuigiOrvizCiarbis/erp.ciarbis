@@ -65,7 +65,7 @@ export default async function usersRoutes(fastify) {
   }, async (req, reply) => {
     const body = createSchema.safeParse(req.body)
     if (!body.success) {
-      return reply.status(400).send({ error: 'validation_error', message: body.error.errors[0].message })
+      return reply.status(400).send({ error: 'validation_error', message: body.error.issues[0].message })
     }
 
     const { email, password, nombre, rol } = body.data
@@ -95,7 +95,7 @@ export default async function usersRoutes(fastify) {
 
     const body = updateSchema.safeParse(req.body)
     if (!body.success) {
-      return reply.status(400).send({ error: 'validation_error', message: body.error.errors[0].message })
+      return reply.status(400).send({ error: 'validation_error', message: body.error.issues[0].message })
     }
 
     // Un no-admin no puede cambiar su propio rol ni desactivarse
@@ -135,7 +135,7 @@ export default async function usersRoutes(fastify) {
 
     const body = changePassSchema.safeParse(req.body)
     if (!body.success) {
-      return reply.status(400).send({ error: 'validation_error', message: body.error.errors[0].message })
+      return reply.status(400).send({ error: 'validation_error', message: body.error.issues[0].message })
     }
 
     const user = await prisma.user.findFirst({ where: { id: req.params.id, tenantId: req.tenantId } })

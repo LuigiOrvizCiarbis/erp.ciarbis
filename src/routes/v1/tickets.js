@@ -166,7 +166,7 @@ export default async function ticketsRoutes(fastify) {
     preHandler: [fastify.verifyJWT, fastify.verifyTenant, fastify.requireRole(['ADMIN', 'VENDEDOR', 'CONTADOR'])],
   }, async (req, reply) => {
     const body = ticketSchema.safeParse(req.body)
-    if (!body.success) return reply.status(400).send({ error: 'validation_error', message: body.error.errors[0].message })
+    if (!body.success) return reply.status(400).send({ error: 'validation_error', message: body.error.issues[0].message })
 
     const nro = await getNextNro(req.tenantId)
     const { lineas, auditoria, cuponCodigo, descuentoCuponMonto, cotizacionOverride, ...ticketData } = body.data
@@ -351,7 +351,7 @@ export default async function ticketsRoutes(fastify) {
     preHandler: [fastify.verifyJWT, fastify.verifyTenant, fastify.requireRole(['ADMIN', 'CONTADOR'])],
   }, async (req, reply) => {
     const body = emitirFacturaSchema.safeParse(req.body)
-    if (!body.success) return reply.status(400).send({ error: 'validation_error', message: body.error.errors[0].message })
+    if (!body.success) return reply.status(400).send({ error: 'validation_error', message: body.error.issues[0].message })
 
     const ticket = await prisma.ticket.findFirst({
       where: { id: req.params.id, tenantId: req.tenantId },
@@ -423,7 +423,7 @@ export default async function ticketsRoutes(fastify) {
     preHandler: [fastify.verifyJWT, fastify.verifyTenant, fastify.requireRole(['ADMIN', 'VENDEDOR', 'CONTADOR'])],
   }, async (req, reply) => {
     const body = envioSchema.safeParse(req.body)
-    if (!body.success) return reply.status(400).send({ error: 'validation_error', message: body.error.errors[0].message })
+    if (!body.success) return reply.status(400).send({ error: 'validation_error', message: body.error.issues[0].message })
 
     const ticket = await prisma.ticket.findFirst({ where: { id: req.params.id, tenantId: req.tenantId } })
     if (!ticket) return reply.status(404).send({ error: 'not_found', message: 'Ticket no encontrado.' })
