@@ -871,11 +871,11 @@ tr:hover td{background:rgba(255,255,255,.015)}
       <div class="sidebar-version">
         <div class="sidebar-version-full">
           <div style="opacity:.75">Powered by BIMS ERP</div>
-          <div>V2.107.0</div>
+          <div>V2.107.1</div>
         </div>
         <div class="sidebar-version-mini">
           <div>CIARBIS©</div>
-          <div>V2.107.0</div>
+          <div>V2.107.1</div>
         </div>
       </div>
     </div>
@@ -13265,7 +13265,7 @@ async function home_metricas_cargar(){
     var sucQ = viewSucursalId ? '&sucursalId='+encodeURIComponent(viewSucursalId) : '';
     var [ovs,clr,prods,tks,ocs,cls]=await Promise.all([
       apiList('/api/v1/ordenes-venta?limit=500'+sucQ),
-      apiGet('/api/v1/clientes?limit=1'),
+      apiGet('/api/v1/clientes?limit=1&activo=true'),
       apiList('/api/v1/productos?limit=500&activo=true'),
       apiList('/api/v1/tickets?limit=500'+sucQ),
       apiList('/api/v1/ordenes-compra?limit=500'),
@@ -13532,7 +13532,7 @@ MODULES.home = async function(){
     +'<div id="home-kpis" style="margin-top:24px"><div style="color:var(--text2);font-size:13px">Cargando métricas...</div></div>'
     +'<div id="home-metricas" style="margin-top:28px"></div>';
   try {
-    var [pr,clr,ovs]=await Promise.all([apiGet('/api/v1/productos?limit=1'),apiGet('/api/v1/clientes?limit=1'),apiList('/api/v1/ordenes-venta?limit=100')]);
+    var [pr,clr,ovs]=await Promise.all([apiGet('/api/v1/productos?limit=1&activo=true'),apiGet('/api/v1/clientes?limit=1&activo=true'),apiList('/api/v1/ordenes-venta?limit=100')]);
     var totalV=ovs.reduce(function(a,o){return a+Number(o.total||0);},0);
     var kpisEl=document.getElementById('home-kpis');
     if(kpisEl) kpisEl.innerHTML='<div class="section-title">Resumen</div><div class="kpi-row">'
