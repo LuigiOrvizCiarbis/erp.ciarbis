@@ -871,11 +871,11 @@ tr:hover td{background:rgba(255,255,255,.015)}
       <div class="sidebar-version">
         <div class="sidebar-version-full">
           <div style="opacity:.75">Powered by BIMS ERP</div>
-          <div>V2.107.3</div>
+          <div>V2.107.4</div>
         </div>
         <div class="sidebar-version-mini">
           <div>CIARBIS©</div>
-          <div>V2.107.3</div>
+          <div>V2.107.4</div>
         </div>
       </div>
     </div>
@@ -3200,6 +3200,12 @@ function inv_papel_bar_refrescar(){
   el.innerHTML = papel_estado('productos').viendo
     ? papel_bulk_bar_html('productos','producto','inv_papel_reactivar_masivo')
     : '';
+  // Mantener el checkbox "todos" del encabezado en sintonía con las filas tildadas de la Papelera.
+  var todos=document.getElementById('inv-sel-todos');
+  if(todos && papel_estado('productos').viendo){
+    var filas=document.querySelectorAll('#inv-tabla-wrap tbody input[type=checkbox]').length;
+    todos.checked = filas>0 && papel_sel_count('productos')===filas;
+  }
   if(!papel_estado('productos').viendo) inv_sel_actualizar_barra();
 }
 async function inv_papel_reactivar_uno(id){
@@ -3251,6 +3257,15 @@ function inv_sel_toggle(id, checked){
   inv_sel_actualizar_barra();
 }
 function inv_sel_toggle_todos(checked){
+  // V2.107.4: en la vista Papelera el "seleccionar todo" manejaba la selección de Activos
+  // (_inv_sel / .inv-sel-chk) → no tildaba ninguna fila ni mostraba "Reactivar seleccionados".
+  if(papel_estado('productos').viendo){
+    var st=papel_estado('productos'); st.sel={};
+    if(checked) ((window._inf.productos&&window._inf.productos.items)||[]).forEach(function(p){ st.sel[p.id]=true; });
+    document.querySelectorAll('#inv-tabla-wrap tbody input[type=checkbox]').forEach(function(chk){ chk.checked=checked; });
+    inv_papel_bar_refrescar();
+    return;
+  }
   window._inv_sel={};
   if(checked) ((window._inf.productos&&window._inf.productos.items)||[]).forEach(function(p){ window._inv_sel[p.id]=true; });
   document.querySelectorAll('.inv-sel-chk').forEach(function(chk){ chk.checked=checked; });
