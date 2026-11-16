@@ -871,11 +871,11 @@ tr:hover td{background:rgba(255,255,255,.015)}
       <div class="sidebar-version">
         <div class="sidebar-version-full">
           <div style="opacity:.75">Powered by BIMS ERP</div>
-          <div>V2.107.2</div>
+          <div>V2.107.3</div>
         </div>
         <div class="sidebar-version-mini">
           <div>CIARBIS©</div>
-          <div>V2.107.2</div>
+          <div>V2.107.3</div>
         </div>
       </div>
     </div>
@@ -2093,15 +2093,15 @@ function moduleLabel(mod){
 /* ═══════════════════════════════════════
    TOAST
 ═══════════════════════════════════════ */
-function showToast(msg, type){
+function showToast(msg, type, ms){
   var t=document.createElement('div');
-  t.style.cssText='position:fixed;bottom:24px;right:24px;z-index:9999;padding:12px 18px;border-radius:10px;font-size:13px;font-weight:500;max-width:320px;box-shadow:0 8px 24px rgba(0,0,0,0.12);transition:opacity 0.3s';
+  t.style.cssText='position:fixed;bottom:24px;right:24px;z-index:9999;padding:12px 18px;border-radius:10px;font-size:13px;font-weight:500;max-width:320px;box-shadow:0 8px 24px rgba(0,0,0,0.12);transition:opacity 0.3s;white-space:pre-line';
   if(type==='ok') t.style.background='#DCFCE7',t.style.color='#15803D',t.style.border='1px solid rgba(22,163,74,0.2)';
   else if(type==='danger') t.style.background='#FEE2E2',t.style.color='#B91C1C',t.style.border='1px solid rgba(220,38,38,0.2)';
   else t.style.background='#FEF3C7',t.style.color='#B45309',t.style.border='1px solid rgba(217,119,6,0.2)';
   t.textContent=msg;
   document.body.appendChild(t);
-  setTimeout(function(){ t.style.opacity='0'; setTimeout(function(){ t.remove(); },300); }, 3000);
+  setTimeout(function(){ t.style.opacity='0'; setTimeout(function(){ t.remove(); },300); }, ms||3000);
 }
 
 /* ═══════════════════════════════════════
@@ -2464,7 +2464,18 @@ async function papel_reactivar(endpoint, ids, onDoneFn){
   if(!ids.length) return;
   var r=await apiPatch(endpoint,{ids:ids});
   if(r.error){ showToast(r.message||'Error','danger'); return; }
-  showToast((r.actualizados||r.actualizadas||0)+' reactivado(s) ✅','ok');
+  // V2.107.3: limpiar la selección de lo ya procesado (antes la barra seguía diciendo "N seleccionados"
+  // con filas que ya no estaban). Los ids son únicos en todo el sistema → se barren todas las papeleras.
+  Object.keys(window._papelera||{}).forEach(function(k){ ids.forEach(function(id){ delete window._papelera[k].sel[id]; }); });
+  var okN=(r.actualizados||r.actualizadas||0);
+  // V2.107.3: productos que no se reactivaron porque ya existe uno activo con el mismo SKU/código/nombre.
+  if(r.omitidos && r.omitidos.length){
+    var det=r.omitidos.slice(0,5).map(function(o){ return '• '+o.nombre+': '+o.motivo; }).join('\n');
+    if(r.omitidos.length>5) det+='\n… y '+(r.omitidos.length-5)+' más';
+    showToast(okN+' reactivado(s). '+r.omitidos.length+' no se reactivaron (quedarían duplicados):\n'+det,'warn',9000);
+  } else {
+    showToast(okN+' reactivado(s) ✅','ok');
+  }
   onDoneFn();
 }
 // El panel de columnas vive DENTRO del HTML que se re-renderiza en cada toggle/reorden — sin

@@ -938,6 +938,49 @@ export default async function productosRoutes(fastify) {
     return reply.status(400).send({ error: 'validation_error', message: 'Acción no reconocida.' })
   })
 
+  // ── PATCH /productos/reactivar-masivo ──────────────────────
+  // Saca productos de la Papelera (V2.107.3: la pantalla Papelera de Inventario llamaba a esta
+  // ruta y no existía → 404 "Route not found"). SKU y código de barras son únicos por tenant en
+  // la base (Papelera incluida), así que no pueden chocar; el NOMBRE sí: el alta ignora la
+  // Papelera, así que mientras un producto estuvo borrado pudo crearse otro activo con su mismo
+  // nombre. Esos NO se reactivan (quedarían 2 activos iguales, cosa que el alta/edición prohíben)
+  // — se devuelven en `omitidos` con el motivo, para que el usuario renombre uno y reintente.
+  fastify.patch('/productos/reactivar-masivo', {
+    preHandler: [fastify.verifyJWT, fastify.verifyTenant, fastify.requireRole(['ADMIN', 'DEPOSITO'])],
+  }, async (req, reply) => {
+    const ids = Array.isArray(req.body?.ids) ? req.body.ids.filter(id => typeof id === 'string') : []
+    if (!ids.length) return reply.status(400).send({ error: 'validation_error', message: 'Sin productos seleccionados.' })
+
+    const candidatos = await prisma.producto.findMany({
+      where: { id: { in: ids }, tenantId: req.tenantId, activo: false },
+      select: { id: true, nombre: true, sku: true },
+    })
+    if (!candidatos.length) return { message: '0 producto(s) reactivado(s).', actualizados: 0, omitidos: [] }
+
+    const activos = await prisma.producto.findMany({
+      where: { tenantId: req.tenantId, activo: true, OR: candidatos.map(p => ({ nombre: { equals: p.nombre, mode: 'insensitive' } })) },
+      select: { nombre: true },
+    })
+    const nombresActivos = new Set(activos.map(p => p.nombre.toLowerCase()))
+
+    const aReactivar = []
+    const omitidos = []
+    for (const p of candidatos) {
+      const clave = p.nombre.toLowerCase()
+      if (nombresActivos.has(clave)) {
+        omitidos.push({ id: p.id, nombre: p.nombre, sku: p.sku, motivo: 'ya hay un producto activo con ese nombre' })
+        continue
+      }
+      aReactivar.push(p.id)
+      nombresActivos.add(clave) // 2 seleccionados con el mismo nombre: se reactiva solo el primero
+    }
+
+    const r = aReactivar.length
+      ? await prisma.producto.updateMany({ where: { id: { in: aReactivar }, tenantId: req.tenantId }, data: { activo: true } })
+      : { count: 0 }
+    return { message: r.count + ' producto(s) reactivado(s).', actualizados: r.count, omitidos }
+  })
+
   // ── GET /productos/:id/variantes ───────────────────────────
   fastify.get('/productos/:id/variantes', auth, async (req) => {
     return prisma.productoVariante.findMany({
