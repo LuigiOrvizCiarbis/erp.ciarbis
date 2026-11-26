@@ -14,6 +14,7 @@ import {
   filtroUbicacionContiene, compararUbicacion, nivelesUbicacionActivos,
 } from '../../lib/ubicacion.js'
 import { cotizacionDefault, conPreciosEnPesos, listaEnPesos, desdePesos, aPesos } from '../../lib/moneda.js'
+import { conPreciosListas, recalcularPrincipal, cargarConfigListas } from '../../lib/listasPrecio.js'
 
 // Include de las filas por sucursal que pide un listado: la de la sucursal en la que se mira el
 // stock y/o la de la que se quiere la ubicación (pueden ser la misma). null si no pide ninguna.
@@ -191,6 +192,7 @@ const productoSchema = z.object({
   sucursalId: z.string().optional(), // dónde entra el stock inicial (no es una columna de Producto)
   ubicaciones: ubicacionesSchema.optional(), // Pasillo/Estante/Cajón por sucursal (no son columnas de Producto)
   moneda: z.enum(['ARS', 'USD']).optional(), // moneda de precioCosto/precioVenta (V2.106.0)
+  precioManual: z.boolean().optional(), // V2.108.0: true = la lista principal no lo recalcula
 })
 
 const updateSchema = parcial(productoSchema)
@@ -226,7 +228,7 @@ const campoVarianteOpcionSchema = z.object({
 
 const bulkSchema = z.object({
   ids: z.array(z.string()).min(1),
-  accion: z.enum(['categoria', 'margen', 'aumento', 'vencimiento', 'reactivar']),
+  accion: z.enum(['categoria', 'margen', 'aumento', 'vencimiento', 'reactivar', 'precioManual']),
   payload: z.record(z.any()).default({}),
 })
 
@@ -293,6 +295,18 @@ function generarNroLote() {
   const fecha = `${d.getFullYear()}${pad(d.getMonth() + 1)}${pad(d.getDate())}-${pad(d.getHours())}${pad(d.getMinutes())}${pad(d.getSeconds())}`
   const suf = Math.random().toString(36).slice(2, 5).toUpperCase()
   return `${fecha}-${suf}`
+}
+
+// Productos listos para el frontend: precios en pesos + precio de cada lista secundaria (V2.108.0).
+async function paraFront(tenantId, productos) {
+  return conPreciosListas(tenantId, await listaEnPesos(tenantId, productos))
+}
+
+// ¿La lista principal ya calcula precios sola? Recién ahí un precio tipeado a mano marca al
+// producto como manual (antes de activarla, todo precio es "a mano" y no tiene sentido marcarlo).
+async function principalAutomatica(tenantId) {
+  const cfg = await cargarConfigListas(tenantId)
+  return !!(cfg.principal && cfg.principal.autoActiva)
 }
 
 export default async function productosRoutes(fastify) {
@@ -447,7 +461,7 @@ export default async function productosRoutes(fastify) {
       : conSuc
 
     return {
-      data: await listaEnPesos(req.tenantId, result),
+      data: await paraFront(req.tenantId, result),
       meta: { total, page: Number(page), limit: Number(limit), pages: Math.ceil(total / Number(limit)) },
     }
   })
@@ -471,7 +485,7 @@ export default async function productosRoutes(fastify) {
       where: { tenantId: req.tenantId, activo: true, OR: [{ sku: codigo }, { codigoBarras: codigo }] },
       include: { variantes: { where: { activo: true }, ...(incSuc && { include: { stockSucursales: incSuc } }) }, ...(incSuc && { stockSucursales: incSuc }) },
     })
-    if (producto) return { producto: (await listaEnPesos(req.tenantId, [conSucursal(producto, sucursalId, ubicSucursalId)]))[0], variante: null }
+    if (producto) return { producto: (await paraFront(req.tenantId, [conSucursal(producto, sucursalId, ubicSucursalId)]))[0], variante: null }
 
     const variante = await prisma.productoVariante.findFirst({
       where: { tenantId: req.tenantId, activo: true, OR: [{ sku: codigo }, { codigoBarras: codigo }] },
@@ -482,7 +496,7 @@ export default async function productosRoutes(fastify) {
         include: { variantes: { where: { id: variante.id }, ...(incSuc && { include: { stockSucursales: incSuc } }) }, ...(incSuc && { stockSucursales: incSuc }) },
       })
       if (productoDeVariante) {
-        const [enPesos] = await listaEnPesos(req.tenantId, [conSucursal(productoDeVariante, sucursalId, ubicSucursalId)])
+        const [enPesos] = await paraFront(req.tenantId, [conSucursal(productoDeVariante, sucursalId, ubicSucursalId)])
         const { variantes: [varConSuc], ...prod } = enPesos
         return { producto: prod, variante: varConSuc || variante }
       }
@@ -639,7 +653,7 @@ export default async function productosRoutes(fastify) {
       },
     })
     if (!item) return reply.status(404).send({ error: 'not_found', message: 'Producto no encontrado.' })
-    return (await listaEnPesos(req.tenantId, [item]))[0]
+    return (await paraFront(req.tenantId, [item]))[0]
   })
 
   // ── POST /productos ───────────────────────────────────────
@@ -710,6 +724,10 @@ export default async function productosRoutes(fastify) {
       return p
     })
 
+    // Lista principal automática: si no tipearon el precio a mano, sale de la regla.
+    if (!producto.precioManual && await recalcularPrincipal(req.tenantId, [producto.id])) {
+      return reply.status(201).send(await prisma.producto.findUnique({ where: { id: producto.id } }))
+    }
     return reply.status(201).send(producto)
   })
 
@@ -751,9 +769,17 @@ export default async function productosRoutes(fastify) {
     const { stock, sucursalId: _suc, ubicaciones, ...safeData } = body.data
 
     // Se lee el precio actual ANTES de pisarlo para poder auditar el cambio (si lo hay).
-    const antes = safeData.precioVenta !== undefined || safeData.moneda !== undefined
-      ? await prisma.producto.findFirst({ where: { id: req.params.id, tenantId: req.tenantId }, select: { precioVenta: true, precioCosto: true, moneda: true } })
+    const antes = safeData.precioVenta !== undefined || safeData.moneda !== undefined || safeData.precioCosto !== undefined || safeData.precioManual !== undefined
+      ? await prisma.producto.findFirst({ where: { id: req.params.id, tenantId: req.tenantId }, select: { precioVenta: true, precioCosto: true, moneda: true, precioManual: true } })
       : null
+
+    // Precio de venta cambiado a mano con la principal automática → queda manual (salvo que el
+    // form diga explícitamente lo contrario, ej. "volver a automático").
+    if (antes && safeData.precioManual === undefined && safeData.precioVenta !== undefined &&
+        Number(antes.precioVenta) !== Number(safeData.precioVenta) && !(safeData.moneda && safeData.moneda !== antes.moneda) &&
+        await principalAutomatica(req.tenantId)) {
+      safeData.precioManual = true
+    }
 
     // Cambio de moneda: lo que se mandó ya viene en la moneda nueva; lo que NO se mandó (costo o
     // precio sueltos, y los precios propios de las variantes) se convierte para no cambiar de valor.
@@ -774,6 +800,11 @@ export default async function productosRoutes(fastify) {
       : { count: await prisma.producto.count({ where: { id: req.params.id, tenantId: req.tenantId } }) }
     if (result.count === 0) return reply.status(404).send({ error: 'not_found', message: 'Producto no encontrado.' })
     await guardarUbicaciones(prisma, req.tenantId, { productoId: req.params.id }, ubicaciones)
+
+    // Cambió el costo (o lo pasaron a automático): la principal recalcula el precio.
+    if (antes && (safeData.precioManual === false || (safeData.precioCosto !== undefined && Number(safeData.precioCosto) !== Number(antes.precioCosto)) || safeData.moneda)) {
+      await recalcularPrincipal(req.tenantId, [req.params.id])
+    }
 
     if (antes && safeData.precioVenta !== undefined && Number(antes.precioVenta) !== Number(safeData.precioVenta)) {
       await registrarAuditoria({
@@ -855,6 +886,9 @@ export default async function productosRoutes(fastify) {
       return { producto: p, variante: v, lote, stockSucursal: m.sucursal, sucursalId }
     })
 
+    if (precioCosto !== undefined && await recalcularPrincipal(req.tenantId, [producto.id])) {
+      result.producto = await prisma.producto.findUnique({ where: { id: producto.id } })
+    }
     return reply.status(201).send(result)
   })
 
@@ -918,17 +952,27 @@ export default async function productosRoutes(fastify) {
       return { actualizados: r.count }
     }
 
+    // V2.108.0: pasar a precio manual (la principal no los toca) o volver a automático (recalcula).
+    if (accion === 'precioManual') {
+      const manual = payload.manual !== false
+      const r = await prisma.producto.updateMany({ where: { id: { in: ids }, tenantId: req.tenantId }, data: { precioManual: manual } })
+      const recalculados = manual ? 0 : await recalcularPrincipal(req.tenantId, ids)
+      return { actualizados: r.count, recalculados }
+    }
+
     if (accion === 'margen' || accion === 'aumento') {
       const pct = Number(payload.pct)
       if (isNaN(pct)) return reply.status(400).send({ error: 'validation_error', message: 'Falta el porcentaje.' })
       const productos = await prisma.producto.findMany({ where: { id: { in: ids }, tenantId: req.tenantId } })
+      const auto = await principalAutomatica(req.tenantId)
       let actualizados = 0
       await prisma.$transaction(async (tx) => {
         for (const p of productos) {
           const nuevoPrecio = accion === 'margen'
             ? Number(p.precioCosto) * (1 + pct / 100)
             : Number(p.precioVenta) * (1 + pct / 100)
-          await tx.producto.update({ where: { id: p.id }, data: { precioVenta: Math.round(nuevoPrecio * 100) / 100 } })
+          // Precio puesto a mano en masa → manual si la principal ya es automática (si no, se pisaría).
+          await tx.producto.update({ where: { id: p.id }, data: { precioVenta: Math.round(nuevoPrecio * 100) / 100, ...(auto && { precioManual: true }) } })
           actualizados++
         }
       })
@@ -1015,6 +1059,7 @@ export default async function productosRoutes(fastify) {
       await moverStock(tx, { productoId: producto.id, varianteId: v.id, sucursalId, delta: stockInicial }, { marcarMovimiento: false })
       return { ...v, stock: stockInicial }
     })
+    if (datosVariante.precioCosto != null) await recalcularPrincipal(req.tenantId, [producto.id])
     return reply.status(201).send(variante)
   })
 
@@ -1047,6 +1092,7 @@ export default async function productosRoutes(fastify) {
         }
       }
     })
+    if (datos.precioCosto !== undefined && Number(datos.precioCosto) !== Number(actual.precioCosto)) await recalcularPrincipal(req.tenantId, [actual.productoId])
     return prisma.productoVariante.findUnique({ where: { id: req.params.varianteId } })
   })
 
@@ -1294,6 +1340,8 @@ export default async function productosRoutes(fastify) {
       return parentId
     }
 
+    const autoPrincipal = await principalAutomatica(req.tenantId)
+    const tocados = []
     for (let i = 0; i < filas.length; i++) {
       const fila = filas[i]
       const numeroFila = i + 2 // +1 por índice 0, +1 por la fila de encabezado
@@ -1344,6 +1392,7 @@ export default async function productosRoutes(fastify) {
           if (mapeo.descripcion) data.descripcion = descripcion
           if (mapeo.precioCosto) data.precioCosto = convertirMoneda(precioCosto, monedas.costo, moneda, cot)
           if (mapeo.precioVenta) data.precioVenta = convertirMoneda(precioVenta, monedas.precio, moneda, cot)
+          if (mapeo.precioVenta && precioVenta > 0 && autoPrincipal) data.precioManual = true
           if (categoriaId) data.categoriaId = categoriaId
           // Cambia de moneda: lo que no vino en el archivo (y los precios propios de las variantes)
           // se convierte para que no cambie de valor.
@@ -1358,6 +1407,7 @@ export default async function productosRoutes(fastify) {
           if (mapeo.codigoBarras) data.codigoBarras = codigoBarras
           if (Object.keys(data).length) await prisma.producto.update({ where: { id: existente.id }, data })
           await guardarUbicaciones(prisma, req.tenantId, { productoId: existente.id }, ubicaciones)
+          tocados.push(existente.id)
           actualizados++
         } else if (body.data.soloActualizar) {
           errores.push('Fila ' + numeroFila + ': "' + nombre + '" no está cargado — se salteó (no se crean productos nuevos).')
@@ -1378,9 +1428,11 @@ export default async function productosRoutes(fastify) {
                 tenantId: req.tenantId, numero: t.seqProductos, sku, nombre, descripcionCorta, descripcion, stock: 0, um, codigoBarras, moneda,
                 precioCosto: convertirMoneda(precioCosto, monedas.costo, moneda, cot),
                 precioVenta: convertirMoneda(precioVenta, monedas.precio, moneda, cot),
+                ...(mapeo.precioVenta && precioVenta > 0 && autoPrincipal && { precioManual: true }),
                 ...(categoriaId && { categoriaId }),
               },
             })
+            tocados.push(p.id)
             if (stockInicial > 0) {
               await moverStock(tx, { productoId: p.id, sucursalId, delta: stockInicial })
               await tx.movimientoStock.create({
@@ -1400,6 +1452,9 @@ export default async function productosRoutes(fastify) {
         errores.push('Fila ' + numeroFila + ': ' + (err.code === 'P2002' ? 'SKU o código de barras duplicado.' : 'error al guardar.'))
       }
     }
+
+    // Costos/categorías nuevos → la principal automática recalcula (los que trajeron precio quedaron manuales).
+    for (let i = 0; i < tocados.length; i += 200) await recalcularPrincipal(req.tenantId, tocados.slice(i, i + 200))
 
     return { creados, actualizados, errores, totalProcesadas: filas.length }
   })
@@ -1568,6 +1623,7 @@ export default async function productosRoutes(fastify) {
       }
       return row
     })
+    if (preferido) await recalcularPrincipal(req.tenantId, [producto.id])
     return result
   })
 

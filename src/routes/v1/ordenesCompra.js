@@ -9,6 +9,7 @@ import { resolverSucursalStock, moverStock } from '../../lib/stock.js'
 import { registrarMovimientoCuentaInterna, validarCajaParaPago } from '../../lib/cuentasInternas.js'
 import { snapshotCotizacion } from '../../lib/cotizacion.js'
 import { cotizacionDefault, desdePesos } from '../../lib/moneda.js'
+import { recalcularPrincipal } from '../../lib/listasPrecio.js'
 
 const lineaSchema = z.object({
   productoId: z.string(),
@@ -286,6 +287,8 @@ export default async function ordenesCompraRoutes(fastify) {
       return rec
     })
 
+    // Costos nuevos → la lista principal automática recalcula el precio de venta.
+    await recalcularPrincipal(req.tenantId, body.data.items.map((i) => i.productoId))
     return reply.status(201).send(recepcion)
   })
 }

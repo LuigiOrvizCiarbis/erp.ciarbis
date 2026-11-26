@@ -25,6 +25,7 @@ const lineaSchema = z.object({
 
 const ordenSchema = z.object({
   clienteId: z.string().optional(), // sin cliente = venta mostrador / consumidor final
+  listaPrecioId: z.string().optional(), // lista de precios usada (nota interna, V2.108.0)
   sucursalId: z.string().optional(),
   fecha: z.string().datetime().optional(),
   fechaEntrega: z.string().datetime().optional(),
@@ -43,6 +44,15 @@ async function getNextNro(tenantId) {
     select: { nro: true },
   })
   return (last?.nro || 0) + 1
+}
+
+// Lista de precios usada en la venta (nota interna V2.108.0): se valida contra el tenant y se
+// guarda el nombre como snapshot (si después renombran o borran la lista, la venta no cambia).
+async function resolverListaVenta(tenantId, data) {
+  if (!data.listaPrecioId) { delete data.listaPrecioId; return }
+  const l = await prisma.listaPrecio.findFirst({ where: { id: data.listaPrecioId, tenantId }, select: { nombre: true } })
+  if (l) data.listaPrecioNombre = l.nombre
+  else delete data.listaPrecioId
 }
 
 export default async function ordenesVentaRoutes(fastify) {
@@ -130,6 +140,7 @@ export default async function ordenesVentaRoutes(fastify) {
 
     const nro = await getNextNro(req.tenantId)
     const { lineas, ...ordenData } = body.data
+    await resolverListaVenta(req.tenantId, ordenData)
 
     const orden = await prisma.ordenVenta.create({
       data: {

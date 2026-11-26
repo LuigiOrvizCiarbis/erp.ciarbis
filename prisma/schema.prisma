@@ -281,6 +281,13 @@ model ListaPrecio {
   activa    Boolean  @default(true)
   creadoEn  DateTime @default(now())
 
+  // V2.108.0 — listas automáticas. La principal (esDefault) calcula Producto.precioVenta desde el
+  // costo con sus reglas y lo GUARDA; las secundarias se calculan al vuelo sobre `base`:
+  // 'PRINCIPAL' (precio de la lista principal) o 'COSTO'. Ver src/lib/listasPrecio.js.
+  base       String  @default("PRINCIPAL")
+  redondeo   Decimal @default(0) @db.Decimal(10, 2) // 0 = sin redondeo; 10 = al múltiplo de $10 más cercano
+  autoActiva Boolean @default(false) // solo principal: true tras el 1er "Aplicar" confirmado → cada cambio de costo recalcula
+
   margenes ListaPrecioMargen[]
   clientes Cliente[]
 
@@ -289,8 +296,10 @@ model ListaPrecio {
   @@map("listas_precio")
 }
 
-// Un margen % por categoría dentro de una lista (categoriaId null = margen default de esa lista,
-// para productos sin categoría o sin margen específico cargado).
+// Regla de precio dentro de una lista (V2.108.0; antes solo "margen % por categoría").
+// A quién aplica: productoId (ese producto) / categoriaId (esa categoría y sus subcategorías) /
+// proveedorId / categoría+proveedor / nada (regla general de la lista). Gana la más específica.
+// tipo: PCT (base × (1+valor/100)), MONTO (base + valor, en pesos), MANUAL (precio = valor, en pesos).
 model ListaPrecioMargen {
   id            String      @id @default(cuid())
   tenantId      String
@@ -298,10 +307,16 @@ model ListaPrecioMargen {
   listaPrecio   ListaPrecio @relation(fields: [listaPrecioId], references: [id], onDelete: Cascade)
   categoriaId   String?
   categoria     Categoria?  @relation(fields: [categoriaId], references: [id])
-  margenPct     Decimal     @db.Decimal(6, 2)
+  proveedorId   String?
+  proveedor     Proveedor?  @relation(fields: [proveedorId], references: [id])
+  productoId    String?
+  producto      Producto?   @relation(fields: [productoId], references: [id], onDelete: Cascade)
+  tipo          String      @default("PCT")
+  valor         Decimal     @default(0) @db.Decimal(15, 4)
+  margenPct     Decimal     @default(0) @db.Decimal(6, 2) // legado (= valor si tipo PCT); la fuente de verdad es `valor`
 
-  @@unique([listaPrecioId, categoriaId])
   @@index([tenantId])
+  @@index([listaPrecioId])
   @@map("lista_precio_margenes")
 }
 
@@ -400,13 +415,16 @@ model Producto {
   vencimiento      DateTime? // vencimiento "típico" del producto, separado del fechaVenc por lote
 
   // Precios
-  precioCosto Decimal @default(0) @db.Decimal(15, 2)
-  precioVenta Decimal @default(0) @db.Decimal(15, 2)
+  precioCosto  Decimal @default(0) @db.Decimal(15, 2)
+  precioVenta  Decimal @default(0) @db.Decimal(15, 2)
   // Moneda en la que están cargados precioCosto/precioVenta (y los de sus variantes): 'ARS' o
   // 'USD' (V2.106.0). En USD el sistema los muestra y cobra en pesos con la cotización default
   // del tenant del momento — ver src/lib/moneda.js. Lo guardado nunca se reescribe al convertir.
-  moneda      String  @default("ARS")
-  impuesto    Decimal @default(21) @db.Decimal(5, 2) // % IVA
+  moneda       String  @default("ARS")
+  // true = precio de venta fijado a mano (o excluido al aplicar la lista principal): los
+  // recálculos automáticos no lo tocan, pero sigue siendo la base de las listas secundarias.
+  precioManual Boolean @default(false)
+  impuesto     Decimal @default(21) @db.Decimal(5, 2) // % IVA
 
   // Stock global (consolidado de todas las sucursales)
   stock    Decimal  @default(0) @db.Decimal(15, 3)
@@ -435,6 +453,7 @@ model Producto {
   lineasOT         LineaOrdenTrabajo[] // producción
   variantes        ProductoVariante[]
   proveedoresCosto ProductoProveedor[] // costo recordado por proveedor, ver modelo ProductoProveedor
+  reglasLista      ListaPrecioMargen[]
 
   @@unique([tenantId, sku])
   @@unique([tenantId, codigoBarras])
@@ -671,10 +690,11 @@ model Proveedor {
   creadoEn DateTime @default(now())
   actuEn   DateTime @updatedAt
 
-  ordCompras OrdenCompra[]
-  productos  Producto[]
-  pagos      PagoProveedor[]
-  costos     ProductoProveedor[]
+  ordCompras  OrdenCompra[]
+  productos   Producto[]
+  pagos       PagoProveedor[]
+  reglasLista ListaPrecioMargen[]
+  costos      ProductoProveedor[]
 
   @@index([tenantId])
   @@map("proveedores")
@@ -753,9 +773,12 @@ model OrdenVenta {
   sucursalId String?
   sucursal   Sucursal? @relation(fields: [sucursalId], references: [id])
 
-  fecha         DateTime  @default(now())
-  fechaEntrega  DateTime?
-  observaciones String?
+  fecha             DateTime  @default(now())
+  fechaEntrega      DateTime?
+  observaciones     String?
+  // Lista de precios usada (nota interna, no sale en el comprobante del cliente) — V2.108.0
+  listaPrecioId     String?
+  listaPrecioNombre String?
 
   // Totales (desnormalizados para performance en listados)
   subtotal  Decimal @db.Decimal(15, 2)
@@ -943,6 +966,10 @@ model Ticket {
   // único) y esto es la fuente de verdad; el arqueo de caja (POST /caja/:id/cerrar) reparte cada
   // pierna a su propio medio en vez de sumar el total entero a uno solo.
   pagosSplit       Json?
+
+  // Lista de precios con la que se cobró (nota interna, no se imprime en el ticket) — V2.108.0
+  listaPrecioId     String?
+  listaPrecioNombre String?
 
   // Razón social del tenant usada para facturar (si tiene más de una)
   razonSocialId String?

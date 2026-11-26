@@ -33,6 +33,7 @@ const lineaSchema = z.object({
 const ticketSchema = z.object({
   ordenId: z.string().optional(),
   clienteId: z.string().optional(),
+  listaPrecioId: z.string().optional(), // lista con la que se cobró (nota interna, V2.108.0)
   sucursalId: z.string().optional(),
   cajaSesionId: z.string().optional(),
   medioPago: z.enum(['EFECTIVO', 'TARJETA_DEBITO', 'TARJETA_CREDITO', 'TRANSFERENCIA', 'QR', 'CUENTA_CORRIENTE', 'MERCADOPAGO', 'CUENTA_DNI', 'POSNET_BANCOS', 'POSNET_BILLETERAS', 'MODO', 'OTRO']).optional(),
@@ -101,6 +102,15 @@ async function solicitarCAE({ facturaTipo, ptoVta, nroFactura, total }) {
   const caeNum = String(Math.floor(Math.random() * 9e13 + 1e13))
   const vto = new Date(Date.now() + 10 * 24 * 60 * 60 * 1000) // 10 días
   return { cae: caeNum, caeVto: vto }
+}
+
+// Lista de precios usada en la venta (nota interna V2.108.0): se valida contra el tenant y se
+// guarda el nombre como snapshot (si después renombran o borran la lista, la venta no cambia).
+async function resolverListaVenta(tenantId, data) {
+  if (!data.listaPrecioId) { delete data.listaPrecioId; return }
+  const l = await prisma.listaPrecio.findFirst({ where: { id: data.listaPrecioId, tenantId }, select: { nombre: true } })
+  if (l) data.listaPrecioNombre = l.nombre
+  else delete data.listaPrecioId
 }
 
 export default async function ticketsRoutes(fastify) {
@@ -259,6 +269,7 @@ export default async function ticketsRoutes(fastify) {
       precioCosto: l.precioCosto !== undefined ? l.precioCosto : (l.productoId ? (costoPorProducto[l.productoId] ?? null) : null),
     }))
 
+    await resolverListaVenta(req.tenantId, ticketData)
     const ticket = await prisma.$transaction(async (tx) => {
       const t = await tx.ticket.create({
         data: {

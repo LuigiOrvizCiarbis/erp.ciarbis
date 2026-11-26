@@ -18,6 +18,7 @@ import { prisma } from '../../lib/prisma.js'
 import { resolverSucursalStock, moverStock, stockEnSucursal } from '../../lib/stock.js'
 import { cotizacionDefault, aPesos, desdePesos } from '../../lib/moneda.js'
 import { registrarAuditoria } from '../../lib/auditoria.js'
+import { recalcularPrincipal } from '../../lib/listasPrecio.js'
 
 // Interruptores de Ajustes > Producción. Default pensado para que un negocio chico arranque sin
 // configurar nada: lo que agrega pasos (lotes, prioridad, producir sin stock) arranca apagado.
@@ -752,6 +753,7 @@ export default async function produccionRoutes(fastify) {
         },
       })
     }, { timeout: 30000 })
+    await recalcularPrincipal(req.tenantId, [o.productoId]) // si actualizó el costo, la principal recalcula
     registrarAuditoria({ tenantId: req.tenantId, userId: req.user.id, accion: 'produccion.ot.completar', entidad: 'OrdenTrabajo', entidadId: o.id, detalle: { nro: o.nro, cantProd: num(res.cantProd), costoTotal: num(res.costoTotal) }, req })
     return res
   }))
