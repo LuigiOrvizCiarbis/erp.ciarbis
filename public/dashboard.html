@@ -2712,14 +2712,16 @@ MODULES.inventario = async function(){
     // Los KPIs se calculan en SQL (endpoint dedicado /productos/kpis) en vez de traer hasta
     // 10.000 productos completos al navegador solo para sumar 4 números — mismo criterio de
     // cálculo, mucho más liviano contra la base remota de producción.
-    var [kpi_v, kvRows, camposVariante, invCats, invFlags] = await Promise.all([
+    var [kpi_v, kvRows, camposVariante, invCats, invFlags, invListas] = await Promise.all([
       apiGet('/api/v1/productos/kpis'+(viewSucursalId?'?sucursalId='+encodeURIComponent(viewSucursalId):'')).catch(function(){return {total:0,sinStock:0,bajos:0,valor:0,valorVenta:0};}),
       apiGet('/api/v1/configuracion/kv').catch(function(){return [];}),
       campos_variante_cargar(),
       apiList('/api/v1/categorias').catch(function(){return [];}),
       inv_flags_cargar(),
+      apiList('/api/v1/listas-precio').catch(function(){return [];}),
     ])
     window._invCats = invCats;
+    inv_listas_columnas(invListas);
     window._invFiltroCat = window._invFiltroCat || '';
     window._variante_campos = camposVariante;
     window._invFlags = invFlags;
@@ -2874,6 +2876,21 @@ var INV_PRODUCTOS_COLUMNAS=[
   {key:'estado', label:'Estado', default:true},
   {key:'actuEn', label:'Última modificación', default:false},
 ];
+// Una columna por lista de precio secundaria (V2.108.0) — key 'lista_<id>', visibles por default
+// (si el dueño creó la lista, quiere ver su precio). Se agregan/sacan según las listas activas.
+function inv_listas_columnas(listas){
+  window._invListas=listas||[];
+  var sec=window._invListas.filter(function(l){return !l.esDefault;});
+  var antes=INV_PRODUCTOS_COLUMNAS.filter(function(c){return c.key.indexOf('lista_')===0;}).map(function(c){return c.key;}).join(',');
+  for(var i=INV_PRODUCTOS_COLUMNAS.length-1;i>=0;i--) if(INV_PRODUCTOS_COLUMNAS[i].key.indexOf('lista_')===0) INV_PRODUCTOS_COLUMNAS.splice(i,1);
+  var idx=INV_PRODUCTOS_COLUMNAS.findIndex(function(c){return c.key==='precio';})+1;
+  sec.forEach(function(l,k){ INV_PRODUCTOS_COLUMNAS.splice(idx+k,0,{key:'lista_'+l.id, label:'🏷️ '+l.nombre, default:true}); });
+  if(sec.map(function(l){return 'lista_'+l.id;}).join(',')!==antes) window._invCols=null; // se re-arma el estado de columnas
+}
+function inv_precio_lista(p, key){
+  var v=p.preciosListas&&p.preciosListas[key.slice(6)];
+  return v==null?null:Number(v);
+}
 // En "Todas las sucursales" la columna "Stock sucursal" no existe (no hay una sucursal de
 // referencia) — se saca de la tabla y del panel de Columnas, sin tocar lo que el admin guardó.
 function inv_columnas(){
@@ -2973,6 +2990,7 @@ function inv_col_getter(p,key){
     case 'estado': var st=Number(p.stock||0), mn=Number(p.stockMin||p.stockMinimo||0); return st<=0?0:st<mn?1:2;
     case 'actuEn': return p.actuEn||p.creadoEn||'';
     default:
+      if(key.indexOf('lista_')===0){ var lv=inv_precio_lista(p,key); return lv==null?-Infinity:lv; }
       if(key.indexOf('ubic_')===0) return ubic_orden_clave((p.ubicacion||{})[key.slice(5)]);
       return '';
   }
@@ -3025,7 +3043,7 @@ function inv_tabla_html(prods){
         case 'stock': var stT=p.stockTotal!==undefined?Number(p.stockTotal):st; var sm=inv_stock_mostrar(p,stT); return '<td style="font-weight:'+(viewSucursalId?'500':'700')+(viewSucursalId?';color:var(--text2)':'')+'">'+fmtCantidad(sm.valor)+(p.ventaPorPeso?' <span style="color:var(--text2);font-size:10px">'+sm.um+'</span>':'')+'</td>';
         case 'min': return '<td>'+fmtCantidad(mn)+'</td>';
         case 'costo': return '<td>'+prod_precio_celda(p,'precioCosto')+(p.ventaPorPeso?'<span style="color:var(--text2)">/kg</span>':'')+'</td>';
-        case 'precio': return '<td>'+prod_precio_celda(p,'precioVenta')+(p.ventaPorPeso?'<span style="color:var(--text2)">/kg</span>':'')+'</td>';
+        case 'precio': return '<td>'+prod_precio_celda(p,'precioVenta')+(p.ventaPorPeso?'<span style="color:var(--text2)">/kg</span>':'')+(p.precioManual?' <span title="Precio manual: la lista principal no lo recalcula" style="cursor:help">✋</span>':'')+'</td>';
         case 'totalCosto': return '<td style="font-weight:600">'+fmtPeso(inv_valor_costo(p))+'</td>';
         case 'categoria': return '<td>'+(inv_cat_ruta(p)||'—')+'</td>';
         case 'proveedor': return '<td>'+(p.proveedor?.nombre||'—')+'</td>';
@@ -3036,6 +3054,7 @@ function inv_tabla_html(prods){
         case 'estado': return '<td>'+estBadge+'</td>';
         case 'actuEn': return '<td style="font-size:12px">'+fmtDateTime(p.actuEn||p.creadoEn)+'</td>';
         default:
+          if(c.key.indexOf('lista_')===0){ var lp=inv_precio_lista(p,c.key); return '<td>'+(lp==null?'—':fmtPeso(lp))+(p.ventaPorPeso&&lp!=null?'<span style="color:var(--text2)">/kg</span>':'')+'</td>'; }
           if(c.key.indexOf('ubic_')===0){ var uv=(p.ubicacion||{})[c.key.slice(5)]; return uv?'<td class="mono" style="font-weight:600">'+imp_esc(uv)+'</td>':'<td style="color:var(--text3)">—</td>'; }
           return '<td>—</td>';
       }
@@ -3096,6 +3115,7 @@ function inv_variante_fila_html(v, state, visibles){
       case 'precio': return '<td style="font-size:12px">'+(v.precioVenta!=null?fmtPeso(v.precioVenta, prod_usd(v,'precioVenta')):'—')+'</td>';
       case 'estado': return '<td>'+(v.activo?'<span class="badge b-ok">Activa</span>':'<span class="badge b-gray">Pausada</span>')+'</td>';
       default:
+        if(c.key.indexOf('lista_')===0){ var vl=inv_precio_lista(v,c.key); return '<td style="font-size:12px">'+(vl==null?'—':fmtPeso(vl))+'</td>'; }
         // Ubicación: la propia de la variante en negro; la heredada del producto, en gris.
         if(c.key.indexOf('ubic_')===0){
           var nk=c.key.slice(5), propia=(v.ubicacion||{})[nk], efect=(v.ubicacionEfectiva||{})[nk];
@@ -3280,6 +3300,9 @@ function inv_sel_actualizar_barra(){
     +'<button class="btn btn-ghost btn-sm" onclick="inv_bulk_categoria()">Asignar categoría</button>'
     +'<button class="btn btn-ghost btn-sm" onclick="inv_bulk_precio(\'margen\')">Aplicar margen %</button>'
     +'<button class="btn btn-ghost btn-sm" onclick="inv_bulk_precio(\'aumento\')">Aplicar aumento %</button>'
+    +'<button class="btn btn-ghost btn-sm" onclick="inv_bulk_lista_regla()">🏷️ Regla de lista de precios</button>'
+    +'<button class="btn btn-ghost btn-sm" onclick="inv_bulk_ejecutar(\'precioManual\',{manual:true})" title="La lista principal no les va a recalcular el precio">✋ Precio manual</button>'
+    +'<button class="btn btn-ghost btn-sm" onclick="inv_bulk_ejecutar(\'precioManual\',{manual:false})" title="Vuelven a tomar el precio de la lista principal">🔄 Precio automático</button>'
     +'<button class="btn btn-ghost btn-sm" onclick="inv_bulk_vencimiento()">Definir vencimiento</button>'
     +'<button class="btn btn-ghost btn-sm" onclick="inv_bulk_variantes()">Agregar variantes</button>'
     +'</div>';
@@ -3304,11 +3327,34 @@ function inv_bulk_vencimiento(){
     +'<div class="form-grid"><div class="form-group full"><label>Vencimiento</label><input id="bulk-venc" type="date"/></div></div>'
     +'<div class="modal-footer"><button class="btn btn-primary" onclick="inv_bulk_ejecutar(\'vencimiento\',{vencimiento:document.getElementById(\'bulk-venc\').value||null})">Aplicar</button><button class="btn btn-ghost" onclick="closeModal()">Cancelar</button></div>');
 }
+// Regla de lista de precios para los productos tildados (V2.108.0): misma regla que en Ajustes >
+// Listas de precio, con destino "productos puntuales".
+async function inv_bulk_lista_regla(){
+  var ids=Object.keys(window._inv_sel); if(!ids.length) return;
+  var listas=window._invListas&&window._invListas.length?window._invListas:await apiList('/api/v1/listas-precio').catch(function(){return [];});
+  openModal('<h3 class="modal-title">Regla de lista de precios — '+ids.length+' producto(s)</h3>'
+    +'<div class="form-grid">'
+    +'<div class="form-group full"><label>Lista</label><select id="bulk-lp-lista">'+listas.map(function(l){return '<option value="'+l.id+'" data-base="'+(l.esDefault||l.base==='COSTO'?'el costo':'la lista principal')+'">'+(l.esDefault?'⭐ ':'🏷️ ')+lp_esc(l.nombre)+'</option>';}).join('')+'</select></div>'
+    +'<div class="form-group"><label>Tipo de ajuste</label><select id="bulk-lp-tipo"><option value="PCT">% sobre la base de la lista</option><option value="MONTO">$ fijo sobre la base de la lista</option><option value="MANUAL">Precio manual (fijo)</option></select></div>'
+    +'<div class="form-group"><label>Valor</label><input id="bulk-lp-valor" type="number" step="0.01" placeholder="Ej: 30"/></div>'
+    +'<div class="form-group full" style="font-size:12px;color:var(--text2)">La lista principal se calcula sobre el costo; las secundarias sobre la principal o el costo, según cómo esté configurada cada una. En la lista principal, el precio nuevo se aplica desde Ajustes &gt; Listas de precio &gt; "Vista previa y aplicar".</div>'
+    +'</div>'
+    +'<div class="modal-footer"><button class="btn btn-primary" onclick="inv_bulk_lista_regla_guardar()">Guardar regla</button><button class="btn btn-ghost" onclick="closeModal()">Cancelar</button></div>');
+}
+async function inv_bulk_lista_regla_guardar(){
+  var ids=Object.keys(window._inv_sel);
+  var listaId=document.getElementById('bulk-lp-lista').value, vs=document.getElementById('bulk-lp-valor').value;
+  if(vs===''){ showToast('Cargá el valor','danger'); return; }
+  var r=await apiPost('/api/v1/listas-precio/'+listaId+'/reglas',{tipo:document.getElementById('bulk-lp-tipo').value, valor:+vs, productoIds:ids});
+  if(r.error){ showToast(r.message||'Error','danger'); return; }
+  showToast((r.creadas||0)+' regla(s) guardada(s) ✅','ok');
+  closeModal(); clearCache('productos'); MODULES.inventario();
+}
 async function inv_bulk_ejecutar(accion, payload){
   var ids=Object.keys(window._inv_sel);
   var r=await apiPatch('/api/v1/productos/bulk',{ids:ids, accion:accion, payload:payload});
   if(r.error){ showToast(r.message||'Error','danger'); return; }
-  showToast((r.actualizados||0)+' producto(s) actualizado(s) ✅','ok');
+  showToast((r.actualizados||0)+' producto(s) actualizado(s) ✅'+(r.recalculados?' — '+r.recalculados+' con precio recalculado':''),'ok');
   closeModal(); clearCache('productos'); MODULES.inventario();
 }
 async function inv_bulk_variantes(){
@@ -3363,6 +3409,7 @@ async function modal_prod_nuevo(codigoBarrasPrecargado){
     +'<div class="form-group"><label>Código de barras</label><div style="display:flex;gap:8px"><input id="pn-cb" placeholder="Escaneá o generá uno" value="'+(codigoBarrasPrecargado||'')+'" style="flex:1;min-width:0"/><button type="button" class="btn btn-ghost btn-sm" onclick="document.getElementById(\'pn-cb\').value=generarEAN13()">🎲</button></div></div>'
     +'<div class="form-group"><label>Precio costo</label><input id="pn-costo" type="number" min="0" value="0"/></div>'
     +'<div class="form-group"><label>Precio venta</label><input id="pn-precio" type="number" min="0" value="0" oninput="prod_moneda_hint(\'pn\')"/></div>'
+    +'<div class="form-group full" id="pn-lp-hint" style="margin-top:-6px;font-size:12px;color:var(--text2)"></div>'
     +prod_moneda_campo_html('pn','ARS')
     +'<div class="form-group"><label>Stock inicial</label><div style="display:flex;gap:6px"><input id="pn-stock" type="number" min="0" step="0.001" value="0" style="flex:1;min-width:0" oninput="pn_stock_readout()"/><select id="pn-stock-unidad" style="display:none;width:78px" onchange="pn_stock_readout()"><option value="g">g</option><option value="kg">kg</option></select></div><div id="pn-stock-readout" style="font-size:11px;color:var(--text2);margin-top:3px"></div></div>'
     +stock_sucursal_campo_html('pn-suc')
@@ -3387,6 +3434,7 @@ async function modal_prod_nuevo(codigoBarrasPrecargado){
     +'<div style="margin-top:8px"><button type="button" class="btn btn-ghost btn-sm" onclick="pn_variante_agregar()">+ Agregar a la lista</button></div>'
     +'<div class="modal-footer"><button class="btn btn-primary" onclick="prod_guardar()">Guardar</button><button class="btn btn-ghost" onclick="closeModal()">Cancelar</button></div>');
   ubic_form_cargar('pn');
+  lp_hint_form('pn');
 }
 // ── Imagen de portada (Nuevo producto) — se sube a un data URI en memoria (window._pn_imagen_portada)
 // y recién se manda al backend cuando se guarda el producto, junto con el resto del form. ──
@@ -4450,6 +4498,7 @@ async function prod_guardar(){
     proveedorId:document.getElementById('pn-prov').value||undefined,
     precioCosto:+document.getElementById('pn-costo').value||0,
     precioVenta:+document.getElementById('pn-precio').value||0,
+    precioManual:(window._lp_auto_cache&&window._lp_auto_cache.v&&(+document.getElementById('pn-precio').value||0)>0)?true:undefined,
     moneda:prod_moneda_valor('pn'),
     stock:stockInicial,
     sucursalId:pnSuc||undefined,
@@ -4641,6 +4690,7 @@ async function modal_prod_edit(id){
     +'<div class="form-group"><label>Código de barras</label><div style="display:flex;gap:8px"><input id="pe-cb" value="'+(p.codigoBarras||'')+'" placeholder="Sin código" style="flex:1;min-width:0"/><button type="button" class="btn btn-ghost btn-sm" onclick="document.getElementById(\'pe-cb\').value=generarEAN13()">🎲</button></div></div>'
     +'<div class="form-group"><label>Precio costo</label><input id="pe-costo" type="number" value="'+(prod_es_usd(p)?(p.precioCostoOrig||0):(p.precioCosto||p.costo||0))+'"/></div>'
     +'<div class="form-group"><label>Precio venta</label><input id="pe-precio" type="number" value="'+(prod_es_usd(p)?(p.precioVentaOrig||0):(p.precioVenta||p.precio||0))+'" oninput="prod_moneda_hint(\'pe\')"/></div>'
+    +'<div class="form-group full" id="pe-lp-hint" style="margin-top:-6px;font-size:12px;color:var(--text2)" data-manual="'+(p.precioManual?'1':'')+'"></div>'
     +prod_moneda_campo_html('pe', p.moneda)
     +'<div class="form-group"><label>Stock mínimo</label><input id="pe-min" type="number" value="'+(p.stockMin||p.stockMinimo||0)+'"/></div>'
     +ubic_form_html('pe', p.stockSucursales)
@@ -4675,6 +4725,7 @@ async function modal_prod_edit(id){
   if(p.ventaPorPeso) prod_peso_toggle('pe');
   ubic_form_cargar('pe');
   prod_moneda_hint('pe');
+  lp_hint_form('pe');
 }
 function prod_proveedores_costo_tabla_html(rows){
   if(!rows||!rows.length) return '<div style="color:var(--text2);font-size:13px">Sin proveedores con costo cargado todavía.</div>';
@@ -5174,6 +5225,32 @@ async function prod_variante_borrar(productoId, varianteId, puedeBorrar){
   showToast('Variante eliminada','ok');
   modal_prod_edit(productoId);
 }
+// ── Lista principal automática (V2.108.0) en los formularios de producto ──
+// ¿La lista principal ya calcula precios sola? (caché corto; Ajustes lo invalida al aplicar)
+async function lp_principal_auto(){
+  var c=window._lp_auto_cache;
+  if(c && Date.now()-c.t<60000) return c.v;
+  var ls=await apiList('/api/v1/listas-precio').catch(function(){return [];});
+  var pr=ls.find(function(l){return l.esDefault;});
+  window._lp_auto_cache={v:!!(pr&&pr.autoActiva), t:Date.now()};
+  return window._lp_auto_cache.v;
+}
+async function lp_hint_form(prefijo){
+  var el=document.getElementById(prefijo+'-lp-hint'); if(!el) return;
+  window._pe_volver_auto=false;
+  if(!(await lp_principal_auto())){ el.style.display='none'; return; }
+  if(prefijo==='pn'){ el.innerHTML='🔄 El precio de venta lo calcula la <strong>lista principal</strong> desde el costo: dejalo en 0. Si escribís un precio, ese producto queda con <strong>precio manual</strong>.'; return; }
+  if(el.dataset.manual){
+    el.innerHTML='✋ <strong>Precio manual</strong>: los cambios de costo no lo mueven. <button type="button" class="btn btn-ghost btn-sm" onclick="lp_volver_auto_form()">Volver a automático</button>';
+  } else {
+    el.innerHTML='🔄 <strong>Automático</strong> por la lista principal: si cambiás el costo, el precio se recalcula solo. Si escribís un precio a mano, queda manual.';
+  }
+}
+function lp_volver_auto_form(){
+  window._pe_volver_auto=true;
+  var el=document.getElementById('pe-lp-hint');
+  if(el) el.innerHTML='🔄 Al guardar vuelve a <strong>automático</strong> y el precio se recalcula desde el costo.';
+}
 async function prod_update(id){
   var venc=document.getElementById('pe-venc').value;
   var r=await apiPut('/api/v1/productos/'+id,{
@@ -5185,6 +5262,7 @@ async function prod_update(id){
     proveedorId:document.getElementById('pe-prov').value||null,
     precioCosto:+document.getElementById('pe-costo').value,
     precioVenta:+document.getElementById('pe-precio').value,
+    precioManual:window._pe_volver_auto?false:undefined,
     moneda:prod_moneda_valor('pe'),
     stockMin:+document.getElementById('pe-min').value,
     um:prod_unidad_valor('pe-unidad'),
@@ -5394,7 +5472,7 @@ async function vhist_limpiar(){
   await vhist_filtrar();
 }
 function vhist_tabla_html(lineas){
-  return tableWrap(['Ticket','Fecha','Producto','Categoría','Cliente','Cantidad','Precio unit.','Subtotal','Costo','Ganancia'],
+  return tableWrap(['Ticket','Fecha','Producto','Categoría','Cliente','Lista','Cantidad','Precio unit.','Subtotal','Costo','Ganancia'],
     lineas.length?lineas.map(function(l){
       // precioCosto es el snapshot guardado al momento de ESTA venta (ver LineaTicket.precioCosto)
       // — líneas de antes de que existiera ese campo quedan en "—", no se inventa un costo.
@@ -5405,12 +5483,13 @@ function vhist_tabla_html(lineas){
         +'<td style="font-weight:600">'+(l.producto?l.producto.nombre:l.descripcion)+'</td>'
         +'<td>'+(l.producto&&l.producto.categoria?l.producto.categoria.nombre:'—')+'</td>'
         +'<td>'+(l.ticket&&l.ticket.cliente?l.ticket.cliente.nombre:'Consumidor final')+'</td>'
+        +'<td style="font-size:12px;color:var(--text2)">'+(l.ticket&&l.ticket.listaPrecioNombre?l.ticket.listaPrecioNombre:'—')+'</td>'
         +'<td>'+Number(l.cantidad||0)+'</td>'
         +'<td>'+fmtPeso(l.precioUnit||0)+'</td>'
         +'<td style="font-weight:700">'+fmtPeso(l.subtotal||0)+'</td>'
         +'<td>'+(tieneCosto?fmtPeso(costoLinea):'—')+'</td>'
         +'<td style="font-weight:600;color:'+(tieneCosto?'var(--green)':'inherit')+'">'+(tieneCosto?fmtPeso(ganancia):'—')+'</td></tr>';
-    }).join(''):emptyRow(10,'Sin ventas en el rango/filtro elegido.'));
+    }).join(''):emptyRow(11,'Sin ventas en el rango/filtro elegido.'));
 }
 var VENTAS_OVS_COLUMNAS=[
   {key:'numero', label:'#', fixed:true},
@@ -5418,6 +5497,7 @@ var VENTAS_OVS_COLUMNAS=[
   {key:'fecha', label:'Fecha', default:true},
   {key:'total', label:'Total', default:true},
   {key:'estado', label:'Estado', default:true},
+  {key:'lista', label:'Lista de precios', default:true}, // nota interna V2.108.0 (no sale en el comprobante)
   {key:'actuEn', label:'Última modificación', default:false},
 ];
 function ventas_ovs_col_toggle(key, checked){
@@ -5454,6 +5534,7 @@ function ventas_ovs_getter(o,key){
     case 'total': return Number(o.total||0);
     case 'estado': return o.estado||'';
     case 'actuEn': return o.actuEn||o.creadoEn||'';
+    case 'lista': return (o.listaPrecioNombre||'').toLowerCase();
     default: return '';
   }
 }
@@ -5473,6 +5554,7 @@ function ventas_table_ovs(ovs){
         case 'total': return '<td style="font-weight:700">'+fmtPeso(o.total||0)+'</td>';
         case 'estado': return '<td>'+statusBadge(o.estado||'—')+'</td>';
         case 'actuEn': return '<td style="font-size:12px">'+fmtDateTime(o.actuEn||o.creadoEn)+'</td>';
+        case 'lista': return '<td style="font-size:12px;color:var(--text2)">'+(o.listaPrecioNombre?'🏷️ '+o.listaPrecioNombre:'—')+'</td>';
         default: return '<td>—</td>';
       }
     }).map(function(td,i){ return tcol_td_style_wrap(td, state, visibles, visibles[i].key); }).join('');
@@ -9978,7 +10060,7 @@ async function fin_facturas_cargar(){
           var puedeFacturar = t.tipo==='X' && !t.facturaEmitida && !t.esNotaCredito && t.estado==='EMITIDO';
           return '<tr><td class="mono">'+(t.numero||'—')+'</td>'
             +'<td><span class="badge b-info">'+(t.esNotaCredito?'NC':(t.tipo||'X'))+'</span></td>'
-            +'<td>'+(t.clienteNombre||t.cliente?.nombre||'—')+'</td>'
+            +'<td>'+(t.clienteNombre||t.cliente?.nombre||'—')+(t.listaPrecioNombre?'<div style="font-size:11px;color:var(--text2)" title="Nota interna: lista de precios con la que se cobró (no sale en el comprobante)">🏷️ '+t.listaPrecioNombre+'</div>':'')+'</td>'
             +'<td>'+fmtDate(t.creadoEn||t.fecha)+'</td>'
             +'<td style="font-weight:700">'+fmtPeso(t.total||0, t.montoUSD)+'</td>'
             +'<td>'+statusBadge(t.estado||'—')+'</td>'
@@ -10594,7 +10676,7 @@ MODULES.pos = async function(){
   var main=document.getElementById('main');
   main.innerHTML='<div class="loading-state"><div class="loading-icon">'+ICON_SPIN+'</div>Cargando...</div>';
   try {
-    var [prods,cls,sucs,caja,kv,cats,layout,mediosPago,camposVariante]=await Promise.all([
+    var [prods,cls,sucs,caja,kv,cats,layout,mediosPago,camposVariante,listasPrecio]=await Promise.all([
       apiList('/api/v1/productos?limit=500&activo=true&ubicSucursalId=auto'),
       apiList('/api/v1/clientes?limit=200&activo=true'),
       apiGet('/api/v1/configuracion/sucursales').catch(function(){return [];}),
@@ -10604,8 +10686,10 @@ MODULES.pos = async function(){
       apiGet('/api/v1/configuracion/pos-layout').catch(function(){return {anchoCaja:null};}),
       apiGet('/api/v1/configuracion/medios-pago').catch(function(){return {activos:MEDIOS_PAGO_DEFAULT_ACTIVOS, custom:[]};}),
       campos_variante_cargar(),
+      apiList('/api/v1/listas-precio').catch(function(){return [];}),
     ]);
     window._variante_campos=camposVariante;
+    window._pos_listas=listasPrecio||[];
     ubic_config_de_kv(kv);
     // La caja vende de SU sucursal: el stock (y la ubicación) que se ve en el PoS es el de esa sucursal.
     if(caja && caja.sucursalId && (sucs||[]).length>1){
@@ -10932,6 +11016,7 @@ function pos_render(prods,cls){
     // El autocomplete de arriba es la única UI real; esto es un campo de estado invisible.
     +'<select id="pos-cl" onchange="pos_cliente_change()" style="display:none"><option value="">Consumidor final</option>'+clOpts+'</select>'
     +'<div id="pos-cl-puntos" style="font-size:11px;color:var(--text2);margin-bottom:8px"></div>'
+    +pos_lista_select_html()
     +'<select id="pos-pago" style="width:100%;background:var(--input-bg);border:1px solid var(--border);border-radius:8px;color:var(--text);padding:9px;font-size:13px;margin-bottom:8px">'+pos_medios_pago_options_html()+'</select>'
     +'<label style="display:flex;align-items:center;gap:6px;font-size:12px;color:var(--text2);margin-bottom:8px;cursor:pointer"><input type="checkbox" id="pos-pago-split-chk" onchange="pos_pago_split_toggle()"/> Dividir en 2 métodos de pago</label>'
     +'<div id="pos-pago-split-wrap" style="display:none;margin-bottom:8px">'
@@ -11083,7 +11168,7 @@ function pos_lista_tabla_html(prods){
         case 'stock': return '<td>'+fmtCantidad(Number(p.stock||0))+(p.ventaPorPeso?' <span style="color:var(--text2);font-size:10px">'+(p.um||'g')+'</span>':'')+'</td>';
         case 'descripcionCorta': return '<td style="font-size:12px">'+(p.descripcionCorta||'—')+'</td>';
         case 'descripcion': return '<td style="font-size:12px">'+(p.descripcion||'—')+'</td>';
-        case 'precio': return '<td style="font-weight:700">'+fmtPesoCaja(p.precioVenta||p.precio||0)+'</td>';
+        case 'precio': return '<td style="font-weight:700">'+fmtPesoCaja(pos_calcular_precio_lista(p))+'</td>';
         case 'actualizado': return '<td style="font-size:12px;color:var(--text2)">'+fmtDate(p.actuEn||p.creadoEn)+'</td>';
         case 'ubicacion': return '<td class="mono" style="font-size:12px">'+(imp_esc(ubic_texto_corto(p.ubicacion,' · '))||'—')+'</td>';
         default: return '<td>—</td>';
@@ -11117,7 +11202,7 @@ function pos_categoria_entrar(catId){
 function pos_prod_btn_html(p){
   return '<div class="pos-prod-btn" onclick="pos_click_producto(\''+p.id+'\')">'
     +'<div class="pos-prod-name">'+p.nombre+'</div>'
-    +'<div class="pos-prod-precio">'+fmtPesoCaja(p.precioVenta||p.precio||0)+(p.ventaPorPeso?' /kg':'')+'</div>'
+    +'<div class="pos-prod-precio">'+fmtPesoCaja(pos_calcular_precio_lista(p))+(p.ventaPorPeso?' /kg':'')+'</div>'
     +'<div class="pos-prod-stock">Stock: '+(p.stock||0)+'</div>'+pos_ubic_html(p.ubicacion)+'</div>';
 }
 function pos_cat_btn_html(c){
@@ -11130,7 +11215,7 @@ function pos_prod_btn_ecomm_html(p){
   return '<div class="pos-prod-btn-ecomm" onclick="pos_click_producto(\''+p.id+'\')">'
     +(img?'<img class="pos-prod-img" src="'+img+'"/>':'<div class="pos-prod-img-vacia">📦</div>')
     +'<div class="pos-prod-name">'+p.nombre+'</div>'
-    +'<div class="pos-prod-precio">'+fmtPesoCaja(p.precioVenta||p.precio||0)+(p.ventaPorPeso?' /kg':'')+'</div>'
+    +'<div class="pos-prod-precio">'+fmtPesoCaja(pos_calcular_precio_lista(p))+(p.ventaPorPeso?' /kg':'')+'</div>'
     +pos_ubic_html(p.ubicacion)
     +'</div>';
 }
@@ -11140,20 +11225,53 @@ function pos_focus_search(){
 }
 // Click en la grilla o escaneo con match exacto: si el producto se vende por peso, pide los
 // gramos en vez de sumar 1 unidad directamente (ver pos_peso_modal).
-// Lista de precios: la lista "esDefault" (Consumidor Final) nunca cambia el precio — se sigue
-// usando Producto.precioVenta tal cual. Solo un cliente con una lista NO default recalcula el
-// precio de línea acá: costo × (1+margen%) según la categoría del producto (o el margen "default"
-// de esa lista si no hay uno específico para la categoría). Sin lista o sin margen cargado, cae
-// al precioVenta normal — no rompe nada para quien no usa esta feature.
-function pos_calcular_precio_lista(producto, cliente){
-  var base=Number(producto.precioVenta||producto.precio||0);
-  if(!cliente || !cliente.listaPrecio || cliente.listaPrecio.esDefault) return base;
-  var margenes=cliente.listaPrecio.margenes||[];
-  var margen=margenes.find(function(m){return m.categoriaId===producto.categoriaId;});
-  if(!margen) margen=margenes.find(function(m){return !m.categoriaId;});
-  if(!margen) return base;
-  var costo=Number(producto.precioCosto||0);
-  return Math.round(costo*(1+Number(margen.margenPct)/100)*100)/100;
+// Lista de precios (V2.108.0): el precio principal ya viene calculado en precioVenta y cada
+// producto/variante trae `preciosListas` {listaId: precio} desde la API (src/lib/listasPrecio.js).
+// El selector "pos-lista" de la caja elige con qué lista se cobra; al elegir un cliente con lista
+// asignada se pone sola. Sin selector (no hay listas secundarias) = siempre la principal.
+function pos_lista_select_html(){
+  var sec=(window._pos_listas||[]).filter(function(l){return !l.esDefault;});
+  if(!sec.length) return '';
+  return '<select id="pos-lista" onchange="pos_lista_change()" title="Lista de precios con la que se cobra esta venta" style="width:100%;background:var(--input-bg);border:1px solid var(--border);border-radius:8px;color:var(--text);padding:8px;font-size:12px;margin-bottom:8px">'
+    +'<option value="">⭐ Lista principal</option>'
+    +sec.map(function(l){return '<option value="'+l.id+'">🏷️ '+l.nombre+'</option>';}).join('')+'</select>';
+}
+function pos_lista_actual(){ var s=document.getElementById('pos-lista'); return s?s.value:''; }
+// Lista que se guarda en la venta como nota interna (la principal si no se eligió otra).
+function pos_lista_para_venta(){
+  var id=pos_lista_actual();
+  if(id) return id;
+  var pr=(window._pos_listas||[]).find(function(l){return l.esDefault;});
+  return pr?pr.id:undefined;
+}
+function pos_precio_en_lista(x, base){
+  var lid=pos_lista_actual();
+  if(lid && x && x.preciosListas && x.preciosListas[lid]!=null) return Number(x.preciosListas[lid]);
+  return Number(base||0);
+}
+function pos_calcular_precio_lista(producto){
+  return pos_precio_en_lista(producto, producto.precioVenta||producto.precio||0);
+}
+function pos_lista_change(){
+  pos_lista_recalcular();
+  pos_render_items();
+  var q=document.getElementById('pos-q'); pos_filter(q?q.value:''); // tarjetas con el precio de la lista
+  pos_focus_search();
+}
+// Reprecia las líneas del carrito con la lista elegida — nunca pisa un precio que el cajero ya
+// tocó a mano (precioEditado).
+function pos_lista_recalcular(){
+  (window._pos_carrito||[]).forEach(function(it){
+    if(it.precioEditado) return;
+    if(it.varianteId){
+      var pv=(window._pos_prods||[]).find(function(p){return p.id===it.productoIdTicket;});
+      var v=pv&&(pv.variantes||[]).find(function(x){return x.id===it.varianteId;});
+      if(v) it.precio=pos_precio_en_lista(v, v.precioVenta!=null?v.precioVenta:pv.precioVenta);
+      return;
+    }
+    var prod=(window._pos_prods||[]).find(function(p){return p.id===it.id;});
+    if(prod) it.precio=pos_calcular_precio_lista(prod);
+  });
 }
 function pos_cliente_actual(){
   var sel=document.getElementById('pos-cl');
@@ -11196,7 +11314,7 @@ function pos_variante_modal(p){
     +'<div style="display:grid;grid-template-columns:repeat(2,1fr);gap:8px">'
     +vs.map(function(v){
       var etiqueta=variante_etiqueta(v, window._variante_campos)||v.sku;
-      var precio=v.precioVenta!=null?v.precioVenta:p.precioVenta;
+      var precio=pos_precio_en_lista(v, v.precioVenta!=null?v.precioVenta:p.precioVenta);
       return '<button type="button" class="btn btn-ghost" style="text-align:left;padding:12px" onclick="pos_add_variante_click(\''+p.id+'\',\''+v.id+'\')">'
         +'<div style="font-weight:600">'+etiqueta+'</div>'
         +'<div style="font-size:12px;color:var(--text2)">'+fmtPesoCaja(precio)+' · stock '+Number(v.stock||0)+'</div>'+pos_ubic_html(v.ubicacionEfectiva)+'</button>';
@@ -11220,7 +11338,7 @@ function pos_add_variante(p, v){
     var etiqueta=variante_etiqueta(v, window._variante_campos);
     window._pos_carrito.push({
       id:v.id, nombre:p.nombre+(etiqueta?' — '+etiqueta:''),
-      precio:(v.precioVenta!=null?Number(v.precioVenta):Number(p.precioVenta||0)),
+      precio:pos_precio_en_lista(v, v.precioVenta!=null?v.precioVenta:p.precioVenta),
       // Antes usaba siempre el costo del producto base, aunque la variante tuviera el suyo
       // propio — el margen/ganancia de esa línea quedaba mal calculado para cualquier
       // variante con costo distinto al de sus hermanas.
@@ -11454,13 +11572,15 @@ function pos_cliente_change(){
   var cl=(window._pos_clientes||[]).find(function(c){return c.id===(sel&&sel.value);});
   window._pos_descuento_pct = cl ? Number(cl.descuento||0) : 0;
   window._pos_descuentoTipo = cl ? (cl.descuentoTipo||'PORCENTAJE') : 'PORCENTAJE';
-  // Recalcular el precio de lista de las líneas ya cargadas — pero nunca pisar un precio que
-  // el cajero ya tocó a mano (precioEditado), ni el de una variante (no tiene costo propio).
-  window._pos_carrito.forEach(function(it){
-    if(it.precioEditado || it.varianteId) return;
-    var prod=(window._pos_prods||[]).find(function(p){return p.id===it.id;});
-    if(prod) it.precio=pos_calcular_precio_lista(prod, cl);
-  });
+  // Cliente con lista asignada (no la principal) → la caja pasa a cobrar con esa lista; sin
+  // lista vuelve a la principal. El cajero igual puede cambiarla a mano en el selector.
+  var ls=document.getElementById('pos-lista');
+  if(ls){
+    var lid=cl && cl.listaPrecioId && !(cl.listaPrecio && cl.listaPrecio.esDefault) ? cl.listaPrecioId : '';
+    ls.value = lid && ls.querySelector('option[value="'+lid+'"]') ? lid : '';
+  }
+  pos_lista_recalcular();
+  var qs=document.getElementById('pos-q'); if(ls) pos_filter(qs?qs.value:'');
   pos_cliente_puntos_render(cl);
   pos_render_items();
 }
@@ -12113,7 +12233,7 @@ async function pos_cobrar_confirmar(efectivoInfo, pagosSplit){
   var btn=document.querySelector('.pos-caja-footer .btn-primary');
   if(btn){ btn.disabled=true; btn.textContent='Procesando...'; }
   try {
-    var ov=await apiPost('/api/v1/ordenes-venta',{clienteId:clienteId, sucursalId:sucursalId, subtotal:total, total:total, lineas:lineas});
+    var ov=await apiPost('/api/v1/ordenes-venta',{clienteId:clienteId, sucursalId:sucursalId, listaPrecioId:pos_lista_para_venta(), subtotal:total, total:total, lineas:lineas});
     if(!ov.id){ showToast(ov.message||'Error al registrar la venta','danger'); return; }
 
     // Una venta de PoS es atómica: se confirma al toque (no pasa por el flujo de aprobación B2B)
@@ -12122,7 +12242,7 @@ async function pos_cobrar_confirmar(efectivoInfo, pagosSplit){
     await apiPut('/api/v1/ordenes-venta/'+ov.id+'/estado', {estado:'APROBADA', variantes:variantesVendidas});
 
     var ticket=await apiPost('/api/v1/tickets',{
-      ordenId:ov.id, clienteId:clienteId, sucursalId:sucursalId,
+      ordenId:ov.id, clienteId:clienteId, sucursalId:sucursalId, listaPrecioId:pos_lista_para_venta(),
       cajaSesionId:window._pos_caja.id, medioPago:medioPagoSel.medioPago, medioPagoDetalle:medioPagoSel.medioPagoDetalle,
       pagosSplit:pagosSplit||undefined,
       subtotal:total, total:total,
@@ -12352,8 +12472,19 @@ function etiqueta_texto_wrap(ctx, text, cx, y, maxWidth, lineHeight){
   lines.forEach(function(l,i){ ctx.fillText(l, cx, y+i*lineHeight); });
   return y + lines.length*lineHeight;
 }
+// Lista de precios para las etiquetas (V2.108.0): '' = principal; si se eligió una secundaria en
+// el modal de impresión, la etiqueta sale con ese precio (preciosListas viene de la API).
+function etiqueta_lista_html(){
+  var sec=(window._invListas||window._pos_listas||[]).filter(function(l){return !l.esDefault;});
+  if(!sec.length) return '';
+  var sel=window._etq_lista_id||'';
+  return '<div class="form-group full"><label>Precio de la lista</label><select onchange="window._etq_lista_id=this.value">'
+    +'<option value="">⭐ Lista principal</option>'
+    +sec.map(function(l){return '<option value="'+l.id+'"'+(l.id===sel?' selected':'')+'>🏷️ '+imp_esc(l.nombre)+'</option>';}).join('')+'</select></div>';
+}
 function etiqueta_calcular_precios(p, cuotas){
-  var venta=Number(p.precioVenta||0);
+  var lid=window._etq_lista_id;
+  var venta=Number(lid && p.preciosListas && p.preciosListas[lid]!=null ? p.preciosListas[lid] : (p.precioVenta||0));
   var imp=Number(p.impuesto||0);
   var neto = imp>0 ? venta/(1+imp/100) : venta;
   var tarjeta=(cuotas||[]).map(function(c){
@@ -12588,7 +12719,7 @@ function etiqueta_pedir_cantidad(productoId, useQr, cantidadDefault, volverFn, v
 }
 function etiqueta_cantidad_modal(productoId, useQr, cantidadDefault, varianteId){
   openModal('<h3 class="modal-title">🏷️ Imprimir etiqueta(s)</h3>'
-    +'<div class="form-grid"><div class="form-group full"><label>Cantidad</label><input id="etq-cant" type="number" min="1" value="'+(cantidadDefault||1)+'"/></div></div>'
+    +'<div class="form-grid"><div class="form-group full"><label>Cantidad</label><input id="etq-cant" type="number" min="1" value="'+(cantidadDefault||1)+'"/></div>'+etiqueta_lista_html()+'</div>'
     +'<div class="modal-footer"><button class="btn btn-primary" onclick="etiqueta_pedir_cantidad_confirmar(\''+productoId+'\','+(!!useQr)+(varianteId?',\''+varianteId+'\'':'')+')">Imprimir</button><button class="btn btn-ghost" onclick="closeModal();window._etiqueta_volver()">Ahora no</button></div>');
 }
 async function etiqueta_pedir_cantidad_confirmar(productoId, useQr, varianteId){
@@ -12657,6 +12788,7 @@ function etiqueta_variantes_render(){
     +'<div style="font-size:13px;color:var(--text2);margin:-6px 0 14px">'+imp_esc(e.producto.nombre)+' · '+e.filas.length+' variante(s)</div>'
     +'<label style="display:flex;align-items:center;gap:8px;font-size:14px;margin-bottom:12px;cursor:pointer"><input type="checkbox" '+(e.personalizar?'checked':'')+' onchange="window._etqv.personalizar=this.checked;etiqueta_variantes_render()"/>Personalizar cantidades</label>'
     +tabla
+    +(etiqueta_lista_html()?'<div class="form-grid" style="margin-top:12px">'+etiqueta_lista_html()+'</div>':'')
     +'<div id="etqv-resumen" style="margin-top:14px"></div>'
     +'<div class="modal-footer"><button class="btn btn-primary" id="etqv-btn" onclick="etiqueta_variantes_confirmar()">Imprimir</button><button class="btn btn-ghost" onclick="closeModal();(window._etiqueta_volver||MODULES.inventario)()">Ahora no</button></div>');
   etiqueta_variantes_resumen();
@@ -12697,6 +12829,7 @@ async function etiqueta_variantes_confirmar(){
       codigoBarras: v.codigoBarras,
       precioVenta: v.precioVenta!=null ? v.precioVenta : p.precioVenta,
       precioCosto: v.precioCosto!=null ? v.precioCosto : p.precioCosto,
+      preciosListas: v.preciosListas || p.preciosListas,
     })};
   });
   closeModal();
@@ -12788,6 +12921,7 @@ async function pos_imprimir_etiqueta(productoId, useQr, cantidad, varianteId){
           codigoBarras: useQr ? (variante.codigoBarras||variante.sku) : variante.codigoBarras,
           precioVenta: variante.precioVenta!=null?variante.precioVenta:producto.precioVenta,
           precioCosto: variante.precioCosto!=null?variante.precioCosto:producto.precioCosto,
+          preciosListas: variante.preciosListas || producto.preciosListas,
         });
       }
     }
@@ -14399,99 +14533,333 @@ async function cfg_mp_guardar(){
   window._cfg_mediosPago=r;
   showToast('Métodos de pago actualizados ✅','ok');
 }
-/* ── Tab Listas de precio: margen ganancial bruto por categoría, distinto por lista.
-   La lista "esDefault" (Consumidor Final) nunca pisa Producto.precioVenta — solo las no-default
-   recalculan el precio de línea en el PoS (ver pos_calcular_precio_lista). ── */
+/* ── Tab Listas de precio (V2.108.0) ──
+   Lista PRINCIPAL: calcula y guarda el precio de venta desde el costo con reglas (% / $ fijo /
+   manual) por producto, categoría, proveedor o categoría+proveedor (gana la más específica).
+   Se activa con "Vista previa y aplicar" (con exclusiones); desde ahí cada cambio de costo
+   recalcula solo. Listas SECUNDARIAS: se calculan al vuelo sobre la principal o el costo.
+   Lógica en el backend: src/lib/listasPrecio.js. ── */
+function lp_esc(s){ return String(s==null?'':s).replace(/[&<>"']/g,function(c){return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c];}); }
+var LP_REDONDEOS=[[0,'Sin redondeo'],[1,'A $1'],[10,'A $10'],[50,'A $50'],[100,'A $100'],[500,'A $500'],[1000,'A $1.000']];
+function lp_redondeo_options(sel){ return LP_REDONDEOS.map(function(r){return '<option value="'+r[0]+'"'+(Number(sel||0)===r[0]?' selected':'')+'>'+r[1]+'</option>';}).join(''); }
+function lp_num(n){ return Number(n||0).toLocaleString('es-AR',{maximumFractionDigits:2}); }
+function lp_base_txt(lista){ return lista.esDefault||lista.base==='COSTO' ? 'el costo' : 'la lista principal'; }
+// Orden de especificidad (igual que el backend): producto > cat+prov > categoría > proveedor > general
+function lp_peso(r){ return r.productoId?4:(r.categoriaId&&r.proveedorId)?3:r.categoriaId?2:r.proveedorId?1:0; }
+function lp_destino_txt(r){
+  if(r.productoId) return '📦 '+lp_esc(r.producto?r.producto.nombre:'Producto');
+  var p=[];
+  if(r.categoriaId) p.push('🗂️ '+lp_esc(r.categoria?r.categoria.nombre:'Categoría'));
+  if(r.proveedorId) p.push('🚚 '+lp_esc(r.proveedor?r.proveedor.nombre:'Proveedor'));
+  return p.length?p.join(' + '):'<strong>Todos los productos</strong> <span style="color:var(--text2);font-size:11px">(regla general)</span>';
+}
+function lp_ajuste_txt(r, lista){
+  var v=Number(r.valor);
+  if(r.tipo==='MANUAL') return 'Precio fijo <strong>$'+lp_num(v)+'</strong>';
+  if(r.tipo==='MONTO') return '<strong>'+(v>=0?'+':'−')+' $'+lp_num(Math.abs(v))+'</strong> sobre '+lp_base_txt(lista);
+  return '<strong>'+(v>=0?'+':'−')+lp_num(Math.abs(v))+'%</strong> sobre '+lp_base_txt(lista);
+}
+function lp_reglas_tabla(lista){
+  var reglas=(lista.margenes||[]).slice().sort(function(a,b){return lp_peso(b)-lp_peso(a);});
+  return tableWrap(['A quién aplica','Ajuste',''], reglas.length?reglas.map(function(r){
+    return '<tr><td>'+lp_destino_txt(r)+'</td><td>'+lp_ajuste_txt(r,lista)+'</td>'
+      +'<td style="white-space:nowrap"><button class="btn-icon" title="Editar" onclick="lp_regla_modal(\''+lista.id+'\',\''+r.id+'\')">'+ICON_EDIT+'</button>'
+      +'<button class="btn-icon" title="Borrar" onclick="lp_regla_borrar(\''+lista.id+'\',\''+r.id+'\')">✕</button></td></tr>';
+  }).join(''):emptyRow(3, lista.esDefault?'Sin reglas: el precio de venta se carga a mano en cada producto.':'Sin reglas: esta lista cobra lo mismo que la principal.'));
+}
 async function cfg_listas_precio(content){
   content.innerHTML='<div class="loading-state"><div class="loading-icon">'+ICON_SPIN+'</div>Cargando listas de precio...</div>';
   var enPapelera=papel_estado('listasprecio').viendo;
-  var [listas,cats]=await Promise.all([
+  var [listas,cats,provs]=await Promise.all([
     apiList('/api/v1/listas-precio?activa='+(!enPapelera)).catch(function(){return [];}),
     apiList('/api/v1/categorias').catch(function(){return [];}),
+    apiList('/api/v1/proveedores?limit=500').catch(function(){return [];}),
   ]);
-  window._cfg_listas=listas; window._cfg_lp_categorias=cats;
-  content.innerHTML='<div style="background:var(--surface);border:1px solid var(--border);border-radius:14px;padding:24px;max-width:700px">'
-    +'<h4 style="margin-bottom:14px">Listas de precio</h4>'
-    +'<div style="font-size:12px;color:var(--text2);margin-bottom:14px">Cada lista define un margen ganancial bruto sobre el costo (precioCosto), general y opcionalmente distinto por categoría. La lista "Consumidor Final" (Default) nunca cambia el precio de venta normal — solo las demás recalculan el precio en el PoS para los clientes que tengan esa lista asignada.</div>'
-    +(enPapelera?'':'<div style="display:flex;gap:8px;margin-bottom:14px"><input id="lp-nueva-nombre" placeholder="Nombre de la nueva lista (ej: Desc10%)" style="flex:1"/><button class="btn btn-primary btn-sm" onclick="cfg_lista_crear()">+ Crear</button></div>')
+  window._cfg_listas=listas; window._cfg_lp_categorias=cats; window._cfg_lp_proveedores=provs;
+  var principal=listas.find(function(l){return l.esDefault;});
+  var secundarias=listas.filter(function(l){return !l.esDefault;});
+  var html='<div style="background:var(--surface);border:1px solid var(--border);border-radius:14px;padding:24px;max-width:900px">'
+    +'<h4 style="margin-bottom:6px">Listas de precio</h4>'
+    +'<div style="font-size:12px;color:var(--text2);margin-bottom:18px">La <strong>lista principal</strong> calcula el precio de venta de cada producto desde su costo (ej. costo +30%). Las <strong>listas secundarias</strong> (mayorista, revendedor, etc.) se calculan sobre la principal o sobre el costo, y se usan en Caja, Inventario y etiquetas. En cada lista podés poner reglas distintas por categoría, proveedor, categoría + proveedor o productos puntuales: siempre gana la más específica.</div>';
+  if(principal && !enPapelera){
+    html+='<div style="border:1px solid var(--border);border-radius:12px;padding:16px;margin-bottom:22px">'
+      +'<div style="display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:10px">'
+      +'<div><div style="font-weight:700;font-size:15px">⭐ Lista principal — '+lp_esc(principal.nombre)+'</div>'
+      +'<div style="font-size:12px;color:var(--text2);margin-top:2px">'+(principal.autoActiva
+        ?'<span class="badge b-ok">Automática</span> cada vez que cambia un costo, el precio de venta se recalcula solo (salvo los productos con precio manual).'
+        :'<span class="badge b-warn">Sin aplicar todavía</span> armá las reglas y tocá "Vista previa y aplicar": no se cambia ningún precio hasta que lo confirmes.')+'</div></div>'
+      +'<div style="display:flex;gap:8px;flex-wrap:wrap"><button class="btn btn-ghost btn-sm" onclick="lp_regla_modal(\''+principal.id+'\')">+ Nueva regla</button>'
+      +'<button class="btn btn-primary btn-sm" onclick="lp_preview()"'+((principal.margenes||[]).length?'':' disabled title="Primero cargá al menos una regla"')+'>Vista previa y aplicar</button></div></div>'
+      +lp_reglas_tabla(principal)
+      +'<div style="display:flex;align-items:center;gap:8px;margin-top:10px;font-size:13px"><label style="margin:0">Redondeo del precio:</label><select style="width:auto" onchange="lp_lista_set(\''+principal.id+'\',{redondeo:+this.value})">'+lp_redondeo_options(principal.redondeo)+'</select></div>'
+      +'</div>';
+  }
+  html+='<div style="font-weight:700;font-size:15px;margin-bottom:8px">Listas secundarias</div>'
+    +(enPapelera?'':'<div style="display:flex;gap:8px;margin-bottom:14px;flex-wrap:wrap"><input id="lp-nueva-nombre" placeholder="Nombre (ej: Mayorista, Lista B)" style="flex:1;min-width:180px"/>'
+      +'<select id="lp-nueva-base" style="width:auto"><option value="PRINCIPAL">Sobre la lista principal</option><option value="COSTO">Sobre el costo</option></select>'
+      +'<input id="lp-nueva-pct" type="number" step="0.01" placeholder="% (ej: -10)" style="width:110px"/>'
+      +'<button class="btn btn-primary btn-sm" onclick="cfg_lista_crear()">+ Crear</button></div>')
     +papel_tabs_html('listasprecio','cfg_listas_papel_cambiar')
     +'<div id="listasprecio-papel-bar">'+papel_bulk_bar_html('listasprecio','lista','cfg_listas_reactivar_masivo')+'</div>'
-    +tableWrap(enPapelera?['','Nombre','']:['Nombre','Estado',''], listas.length?listas.map(function(l){
-      return '<tr>'+(enPapelera?'<td>'+papel_check_row_html('listasprecio', l.id, 'cfg_listas_bar_refrescar')+'</td>':'')
-        +'<td style="font-weight:600">'+l.nombre+(l.esDefault?' <span class="badge b-info">Predeterminada</span>':'')+'</td>'
-        +(enPapelera?'':'<td><span class="badge b-ok">Activa</span></td>')
-        +'<td>'+(enPapelera
-          ?'<button class="btn-icon" onclick="cfg_lista_reactivar(\''+l.id+'\')" title="Reactivar">♻️</button>'
-          :('<button class="btn-icon" onclick="cfg_lista_margenes(\''+l.id+'\')" title="Márgenes">'+ICON_EDIT+'</button>'
-            +(l.esDefault?'':'<button class="btn-icon" onclick="cfg_lista_desactivar(\''+l.id+'\')" title="Desactivar">🚫</button>')))
-        +'</td></tr>';
-    }).join(''):emptyRow(3,enPapelera?'La papelera está vacía.':'Sin listas de precio todavía.'))
+    +tableWrap(enPapelera?['','Nombre','']:['Nombre','Calcula sobre','Regla general','Reglas específicas',''], (enPapelera?listas:secundarias).length?(enPapelera?listas:secundarias).map(function(l){
+      if(enPapelera) return '<tr><td>'+papel_check_row_html('listasprecio', l.id, 'cfg_listas_bar_refrescar')+'</td><td style="font-weight:600">'+lp_esc(l.nombre)+'</td>'
+        +'<td><button class="btn-icon" onclick="cfg_lista_reactivar(\''+l.id+'\')" title="Reactivar">♻️</button></td></tr>';
+      var gral=(l.margenes||[]).find(function(m){return lp_peso(m)===0;});
+      var esp=(l.margenes||[]).filter(function(m){return lp_peso(m)>0;}).length;
+      return '<tr><td style="font-weight:600">'+lp_esc(l.nombre)+'</td>'
+        +'<td>'+(l.base==='COSTO'?'Costo':'Lista principal')+'</td>'
+        +'<td>'+(gral?lp_ajuste_txt(gral,l).replace(/ sobre .*/,''):'<span style="color:var(--text2)">= principal</span>')+'</td>'
+        +'<td>'+(esp?esp+' regla(s)':'—')+'</td>'
+        +'<td style="white-space:nowrap"><button class="btn-icon" onclick="cfg_lista_margenes(\''+l.id+'\')" title="Editar reglas">'+ICON_EDIT+'</button>'
+        +'<button class="btn-icon" onclick="cfg_lista_desactivar(\''+l.id+'\')" title="Desactivar">🚫</button></td></tr>';
+    }).join(''):emptyRow(5,enPapelera?'La papelera está vacía.':'Sin listas secundarias todavía.'))
     +'</div>';
+  content.innerHTML=html;
 }
 function cfg_listas_papel_cambiar(viendo){ papel_cambiar_vista('listasprecio', viendo); cfg_tab_render(document.getElementById('cfg-content'),'listasprecio'); }
 function cfg_listas_bar_refrescar(){
   var el=document.getElementById('listasprecio-papel-bar');
   if(el) el.innerHTML=papel_bulk_bar_html('listasprecio','lista','cfg_listas_reactivar_masivo');
 }
-async function cfg_lista_reactivar(id){
-  await papel_reactivar('/api/v1/listas-precio/reactivar-masivo', [id], function(){ cfg_tab_render(document.getElementById('cfg-content'),'listasprecio'); });
-}
-async function cfg_listas_reactivar_masivo(){
-  await papel_reactivar('/api/v1/listas-precio/reactivar-masivo', Object.keys(papel_estado('listasprecio').sel), function(){ cfg_tab_render(document.getElementById('cfg-content'),'listasprecio'); });
-}
+function cfg_listas_rerender(){ cfg_tab_render(document.getElementById('cfg-content'),'listasprecio'); }
+async function cfg_lista_reactivar(id){ await papel_reactivar('/api/v1/listas-precio/reactivar-masivo', [id], cfg_listas_rerender); }
+async function cfg_listas_reactivar_masivo(){ await papel_reactivar('/api/v1/listas-precio/reactivar-masivo', Object.keys(papel_estado('listasprecio').sel), cfg_listas_rerender); }
 async function cfg_lista_crear(){
   var nombre=document.getElementById('lp-nueva-nombre').value.trim();
-  if(!nombre){showToast('Nombre requerido','danger');return;}
-  var r=await apiPost('/api/v1/listas-precio',{nombre:nombre});
+  if(!nombre){showToast('Poné un nombre para la lista','danger');return;}
+  var base=document.getElementById('lp-nueva-base').value;
+  var pct=document.getElementById('lp-nueva-pct').value;
+  var r=await apiPost('/api/v1/listas-precio',{nombre:nombre, base:base});
   if(!r.id){showToast(r.message||'Error','danger');return;}
+  if(pct!=='') await apiPost('/api/v1/listas-precio/'+r.id+'/reglas',{tipo:'PCT', valor:+pct});
   showToast('Lista creada ✅','ok');
-  cfg_tab_render(document.getElementById('cfg-content'),'listasprecio');
+  cfg_listas_rerender();
 }
 async function cfg_lista_desactivar(id){
   var r=await apiDel('/api/v1/listas-precio/'+id);
   if(r.error){showToast(r.message||'Error','danger');return;}
   showToast('Lista desactivada','ok');
-  cfg_tab_render(document.getElementById('cfg-content'),'listasprecio');
+  cfg_listas_rerender();
 }
+async function lp_lista_set(id, data){
+  var r=await apiPut('/api/v1/listas-precio/'+id, data);
+  if(r.error){showToast(r.message||'Error','danger');return false;}
+  showToast('Guardado ✅','ok');
+  window._cfg_listas=await apiList('/api/v1/listas-precio').catch(function(){return window._cfg_listas;});
+  return true;
+}
+async function lp_recargar_y(volverA){
+  window._cfg_listas=await apiList('/api/v1/listas-precio').catch(function(){return window._cfg_listas||[];});
+  var l=(window._cfg_listas||[]).find(function(x){return x.id===volverA;});
+  if(l && !l.esDefault) cfg_lista_margenes(volverA); else { closeModal(); cfg_listas_rerender(); }
+}
+// Detalle de una lista secundaria: base, redondeo y reglas.
 function cfg_lista_margenes(id){
-  var lista=(window._cfg_listas||[]).find(function(l){return l.id===id;});
-  if(!lista) return;
-  var margenDefault=(lista.margenes||[]).find(function(m){return !m.categoriaId;});
-  var margenesCat=(lista.margenes||[]).filter(function(m){return m.categoriaId;});
-  openModal('<h3 class="modal-title">Márgenes — '+lista.nombre+'</h3>'
-    +'<div class="form-grid"><div class="form-group full"><label>Margen default (%) — para productos sin margen de categoría propio</label><input id="lp-margen-default" type="number" step="0.01" value="'+(margenDefault?margenDefault.margenPct:'')+'"/></div></div>'
-    +'<div style="margin:-6px 0 14px"><button class="btn btn-ghost btn-sm" onclick="cfg_lista_margen_guardar(\''+id+'\',null)">Guardar margen default</button></div>'
-    +'<div class="section-title">Márgenes por categoría</div>'
-    +'<div id="lp-margenes-cat-list">'+cfg_lista_margenes_cat_html(margenesCat)+'</div>'
-    +'<div style="display:flex;gap:8px;margin-top:10px">'
-    +'<select id="lp-margen-cat-sel" style="flex:1">'+cat_options_html(window._cfg_lp_categorias||[])+'</select>'
-    +'<input id="lp-margen-cat-pct" type="number" step="0.01" placeholder="% margen" style="width:100px"/>'
-    +'<button class="btn btn-ghost btn-sm" onclick="cfg_lista_margen_guardar(\''+id+'\',document.getElementById(\'lp-margen-cat-sel\').value)">+ Agregar</button>'
+  var l=(window._cfg_listas||[]).find(function(x){return x.id===id;});
+  if(!l) return;
+  openModalWide('<h3 class="modal-title">Lista — '+lp_esc(l.nombre)+'</h3>'
+    +'<div class="form-grid">'
+    +'<div class="form-group"><label>Calcula sobre</label><select onchange="lp_lista_set(\''+id+'\',{base:this.value}).then(function(){lp_recargar_y(\''+id+'\');})"><option value="PRINCIPAL"'+(l.base!=='COSTO'?' selected':'')+'>La lista principal</option><option value="COSTO"'+(l.base==='COSTO'?' selected':'')+'>El costo</option></select></div>'
+    +'<div class="form-group"><label>Redondeo</label><select onchange="lp_lista_set(\''+id+'\',{redondeo:+this.value})">'+lp_redondeo_options(l.redondeo)+'</select></div>'
     +'</div>'
-    +'<div class="modal-footer"><button class="btn btn-ghost" onclick="closeModal()">Cerrar</button></div>');
+    +'<div style="display:flex;justify-content:space-between;align-items:center;margin:6px 0 8px"><div class="section-title" style="margin:0">Reglas</div><button class="btn btn-ghost btn-sm" onclick="lp_regla_modal(\''+id+'\')">+ Nueva regla</button></div>'
+    +lp_reglas_tabla(l)
+    +'<div style="font-size:12px;color:var(--text2);margin-top:8px">Sin regla que aplique, el producto se cobra con el precio de la lista principal.</div>'
+    +'<div class="modal-footer"><button class="btn btn-ghost" onclick="closeModal();cfg_listas_rerender()">Cerrar</button></div>');
 }
-function cfg_lista_margenes_cat_html(margenesCat){
-  if(!margenesCat.length) return '<div style="color:var(--text2);font-size:13px">Sin márgenes por categoría (usa el default para todas).</div>';
-  return margenesCat.map(function(m){
-    return '<div style="display:flex;justify-content:space-between;padding:4px 0;border-bottom:1px solid var(--border);font-size:13px"><span>'+(m.categoria?m.categoria.nombre:'—')+'</span><span>'+m.margenPct+'% <button class="btn-icon" onclick="cfg_lista_margen_borrar(\''+m.listaPrecioId+'\',\''+m.id+'\')">✕</button></span></div>';
+
+/* ── Alta / edición de regla ── */
+function lp_regla_modal(listaId, reglaId){
+  var l=(window._cfg_listas||[]).find(function(x){return x.id===listaId;});
+  if(!l) return;
+  var r=reglaId?(l.margenes||[]).find(function(m){return m.id===reglaId;}):null;
+  window._lp_regla={listaId:listaId, reglaId:reglaId||null, productos:{}};
+  var destinoHtml = r
+    ? '<div class="form-group full"><label>Aplica a</label><div style="padding:8px 0">'+lp_destino_txt(r)+'</div></div>'
+    : '<div class="form-group full"><label>¿A qué productos aplica?</label><select id="lp-r-destino" onchange="lp_regla_destino()">'
+      +'<option value="general">Todos los productos (regla general)</option>'
+      +'<option value="categoria">Una categoría (incluye sus subcategorías)</option>'
+      +'<option value="proveedor">Un proveedor</option>'
+      +'<option value="catprov">Una categoría de un proveedor</option>'
+      +'<option value="productos">Productos puntuales</option></select></div>'
+      +'<div class="form-group" id="lp-r-cat-g" style="display:none"><label>Categoría</label><select id="lp-r-cat">'+cat_options_html(window._cfg_lp_categorias||[]).replace('Sin categoría','Elegí una categoría')+'</select></div>'
+      +'<div class="form-group" id="lp-r-prov-g" style="display:none"><label>Proveedor</label><select id="lp-r-prov">'+prov_options_html(window._cfg_lp_proveedores||[]).replace('Sin proveedor','Elegí un proveedor')+'</select></div>'
+      +'<div class="form-group full" id="lp-r-prod-g" style="display:none"><label>Productos</label>'
+      +'<input id="lp-r-prod-q" placeholder="Buscá por nombre, SKU o código y tildá los que quieras" oninput="lp_regla_buscar()"/>'
+      +'<div id="lp-r-prod-sel" style="display:flex;flex-wrap:wrap;gap:6px;margin:6px 0"></div>'
+      +'<div id="lp-r-prod-res" style="max-height:220px;overflow:auto;border:1px solid var(--border);border-radius:8px"></div></div>';
+  var tipo=r?r.tipo:'PCT';
+  openModal('<h3 class="modal-title">'+(r?'Editar regla':'Nueva regla')+' — '+lp_esc(l.nombre)+'</h3>'
+    +'<div class="form-grid">'+destinoHtml
+    +'<div class="form-group"><label>Tipo de ajuste</label><select id="lp-r-tipo" onchange="lp_regla_ayuda()">'
+    +'<option value="PCT"'+(tipo==='PCT'?' selected':'')+'>% sobre '+lp_base_txt(l)+'</option>'
+    +'<option value="MONTO"'+(tipo==='MONTO'?' selected':'')+'>$ fijo sobre '+lp_base_txt(l)+'</option>'
+    +'<option value="MANUAL"'+(tipo==='MANUAL'?' selected':'')+'>Precio manual (fijo)</option></select></div>'
+    +'<div class="form-group"><label id="lp-r-valor-l">Valor</label><input id="lp-r-valor" type="number" step="0.01" value="'+(r?Number(r.valor):'')+'" oninput="lp_regla_ayuda()"/></div>'
+    +'<div class="form-group full" id="lp-r-ayuda" style="font-size:12px;color:var(--text2)"></div>'
+    +'</div>'
+    +'<div class="modal-footer"><button class="btn btn-ghost" onclick="'+(l.esDefault?'closeModal()':'cfg_lista_margenes(\''+listaId+'\')')+'">Cancelar</button><button class="btn btn-primary" onclick="lp_regla_guardar()">Guardar</button></div>');
+  lp_regla_ayuda();
+}
+function lp_regla_destino(){
+  var d=document.getElementById('lp-r-destino').value;
+  document.getElementById('lp-r-cat-g').style.display=(d==='categoria'||d==='catprov')?'':'none';
+  document.getElementById('lp-r-prov-g').style.display=(d==='proveedor'||d==='catprov')?'':'none';
+  document.getElementById('lp-r-prod-g').style.display=d==='productos'?'':'none';
+  if(d==='productos') lp_regla_buscar();
+}
+function lp_regla_ayuda(){
+  var l=(window._cfg_listas||[]).find(function(x){return x.id===(window._lp_regla||{}).listaId;});
+  var tipo=document.getElementById('lp-r-tipo').value, v=Number(document.getElementById('lp-r-valor').value||0);
+  var base=1000, ej;
+  document.getElementById('lp-r-valor-l').textContent = tipo==='PCT'?'Porcentaje (negativo = descuento)':tipo==='MONTO'?'Monto en $ (negativo = descuento)':'Precio final en $';
+  if(tipo==='MANUAL') ej='Todos los productos de esta regla se venden a $'+lp_num(v)+', sin importar el costo.';
+  else { var res=tipo==='PCT'?base*(1+v/100):base+v; ej='Ejemplo: si '+(l?lp_base_txt(l):'la base')+' es $'+lp_num(base)+' → se vende a $'+lp_num(Math.max(0,res))+'.'; }
+  document.getElementById('lp-r-ayuda').textContent=ej;
+}
+var _lp_buscar_t=null;
+function lp_regla_buscar(){
+  clearTimeout(_lp_buscar_t);
+  _lp_buscar_t=setTimeout(async function(){
+    var q=(document.getElementById('lp-r-prod-q')||{}).value||'';
+    var res=await apiList('/api/v1/productos?activo=true&limit=40'+(q?'&q='+encodeURIComponent(q):'')).catch(function(){return [];});
+    var sel=window._lp_regla.productos;
+    var el=document.getElementById('lp-r-prod-res'); if(!el) return;
+    el.innerHTML=res.length?res.map(function(p){
+      return '<label style="display:flex;gap:8px;align-items:center;padding:6px 10px;border-bottom:1px solid var(--border);cursor:pointer;font-weight:400;margin:0">'
+        +'<input type="checkbox" style="width:auto" '+(sel[p.id]?'checked ':'')+'onchange="lp_regla_toggle_prod(\''+p.id+'\',this.checked,this.dataset.n)" data-n="'+lp_esc(p.nombre)+'"/>'
+        +'<span style="flex:1">'+lp_esc(p.nombre)+' <span style="color:var(--text2);font-size:11px">'+lp_esc(p.sku)+'</span></span>'
+        +'<span style="font-size:12px;color:var(--text2)">costo $'+lp_num(p.precioCosto)+'</span></label>';
+    }).join(''):'<div style="padding:10px;color:var(--text2);font-size:13px">Sin resultados.</div>';
+  }, 250);
+}
+function lp_regla_toggle_prod(id, on, nombre){
+  var sel=window._lp_regla.productos;
+  if(on) sel[id]=nombre; else delete sel[id];
+  document.getElementById('lp-r-prod-sel').innerHTML=Object.keys(sel).map(function(k){
+    return '<span class="badge b-info" style="cursor:pointer" title="Quitar" onclick="lp_regla_toggle_prod(\''+k+'\',false);lp_regla_buscar()">'+sel[k]+' ✕</span>';
   }).join('');
 }
-async function cfg_lista_margen_guardar(listaId, categoriaId){
-  var pctInput = categoriaId===null ? document.getElementById('lp-margen-default') : document.getElementById('lp-margen-cat-pct');
-  var pct=pctInput.value;
-  if(pct===''){showToast('Cargá un %','danger');return;}
-  if(categoriaId!==null && !categoriaId){showToast('Elegí una categoría','danger');return;}
-  var r=await apiPut('/api/v1/listas-precio/'+listaId+'/margenes',{categoriaId:categoriaId||null, margenPct:+pct});
-  if(!r.id){showToast(r.message||'Error','danger');return;}
-  showToast('Margen guardado ✅','ok');
-  window._cfg_listas=await apiList('/api/v1/listas-precio').catch(function(){return [];});
-  cfg_lista_margenes(listaId);
-}
-async function cfg_lista_margen_borrar(listaId, margenId){
-  var r=await apiDel('/api/v1/listas-precio/'+listaId+'/margenes/'+margenId);
+async function lp_regla_guardar(){
+  var st=window._lp_regla;
+  var tipo=document.getElementById('lp-r-tipo').value;
+  var vs=document.getElementById('lp-r-valor').value;
+  if(vs===''){showToast('Cargá el valor','danger');return;}
+  var valor=+vs, r;
+  if(st.reglaId){
+    r=await apiPut('/api/v1/listas-precio/'+st.listaId+'/reglas/'+st.reglaId,{tipo:tipo, valor:valor});
+  } else {
+    var d=document.getElementById('lp-r-destino').value, body={tipo:tipo, valor:valor};
+    if(d==='categoria'||d==='catprov'){ body.categoriaId=document.getElementById('lp-r-cat').value; if(!body.categoriaId){showToast('Elegí la categoría','danger');return;} }
+    if(d==='proveedor'||d==='catprov'){ body.proveedorId=document.getElementById('lp-r-prov').value; if(!body.proveedorId){showToast('Elegí el proveedor','danger');return;} }
+    if(d==='productos'){ body.productoIds=Object.keys(st.productos); if(!body.productoIds.length){showToast('Tildá al menos un producto','danger');return;} }
+    r=await apiPost('/api/v1/listas-precio/'+st.listaId+'/reglas', body);
+  }
   if(r.error){showToast(r.message||'Error','danger');return;}
-  window._cfg_listas=await apiList('/api/v1/listas-precio').catch(function(){return [];});
-  cfg_lista_margenes(listaId);
+  var l=(window._cfg_listas||[]).find(function(x){return x.id===st.listaId;});
+  showToast('Regla guardada ✅'+(l&&l.esDefault&&l.autoActiva?' — tocá "Vista previa y aplicar" para actualizar los precios':''),'ok',6000);
+  lp_recargar_y(st.listaId);
+}
+async function lp_regla_borrar(listaId, reglaId){
+  var r=await apiDel('/api/v1/listas-precio/'+listaId+'/reglas/'+reglaId);
+  if(r.error){showToast(r.message||'Error','danger');return;}
+  showToast('Regla borrada','ok');
+  var l=(window._cfg_listas||[]).find(function(x){return x.id===listaId;});
+  if(l&&!l.esDefault){ await lp_recargar_y(listaId); } else cfg_listas_rerender();
+}
+
+/* ── Vista previa y aplicar la lista principal ──
+   Las exclusiones por categoría/proveedor las resuelve el backend (re-pide la vista previa);
+   las de productos sueltos se marcan acá con el tilde "mantener precio". */
+async function lp_preview(){
+  window._lp_ex={productoIds:{}, categoriaIds:[], proveedorIds:[]};
+  window._lp_filtro={q:'', soloCambian:true};
+  openModalWide('<h3 class="modal-title">Vista previa — lista principal</h3><div id="lp-pv-body"><div class="loading-state"><div class="loading-icon">'+ICON_SPIN+'</div>Calculando precios...</div></div>');
+  await lp_preview_cargar();
+}
+async function lp_preview_cargar(){
+  var ex=window._lp_ex;
+  var r=await apiPost('/api/v1/listas-precio/principal/preview',{excluir:{productoIds:Object.keys(ex.productoIds), categoriaIds:ex.categoriaIds, proveedorIds:ex.proveedorIds}});
+  if(r.error){ document.getElementById('lp-pv-body').innerHTML='<div style="color:var(--red)">'+lp_esc(r.message||'Error')+'</div>'; return; }
+  window._lp_pv=r.items||[];
+  lp_preview_render();
+}
+function lp_preview_estado(i){ return (i.estado==='cambia'||i.estado==='igual') && window._lp_ex.productoIds[i.id] ? 'excluido' : i.estado; }
+function lp_preview_render(){
+  var items=window._lp_pv||[], ex=window._lp_ex, f=window._lp_filtro;
+  var cnt={cambia:0,igual:0,excluido:0,manual:0,sin_regla:0,sin_cotizacion:0};
+  items.forEach(function(i){ cnt[lp_preview_estado(i)]++; });
+  var mc=document.getElementById('modal-content'), scroll=mc?mc.scrollTop:0;
+  var chip=function(txt,cls){return '<span class="badge '+cls+'" style="font-size:12px;padding:4px 10px">'+txt+'</span>';};
+  var cats=window._cfg_lp_categorias||[], provs=window._cfg_lp_proveedores||[];
+  var nombreDe=function(arr,id){var x=arr.find(function(a){return a.id===id;});return x?x.nombre:id;};
+  document.getElementById('lp-pv-body').innerHTML=
+    '<div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:12px">'
+    +chip(cnt.cambia+' cambian de precio','b-info')+chip(cnt.excluido+' mantienen su precio (quedan manuales)','b-warn')
+    +(cnt.igual?chip(cnt.igual+' ya tienen ese precio','b-gray'):'')+(cnt.manual?chip(cnt.manual+' ya son manuales (no se tocan)','b-gray'):'')
+    +(cnt.sin_regla?chip(cnt.sin_regla+' sin regla (no se tocan)','b-gray'):'')+(cnt.sin_cotizacion?chip(cnt.sin_cotizacion+' en U$D sin cotización','b-red'):'')
+    +'</div>'
+    +'<div style="font-size:12px;color:var(--text2);margin-bottom:6px">¿Querés que algunos mantengan su precio actual? Excluí una categoría o un proveedor entero, o tildá "Mantener" en productos puntuales. Esos quedan con <strong>precio manual</strong> (el costo no los mueve) y siguen siendo la base de las listas secundarias.</div>'
+    +'<div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:8px">'
+    +'<select style="width:auto;flex:1;min-width:180px" onchange="if(this.value){lp_preview_ex(\'categoriaIds\',this.value,true)}">'+cat_options_html(cats).replace('Sin categoría','Excluir una categoría…')+'</select>'
+    +'<select style="width:auto;flex:1;min-width:180px" onchange="if(this.value){lp_preview_ex(\'proveedorIds\',this.value,true)}">'+prov_options_html(provs).replace('Sin proveedor','Excluir un proveedor…')+'</select></div>'
+    +'<div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:10px">'
+    +ex.categoriaIds.map(function(id){return '<span class="badge b-warn" style="cursor:pointer" onclick="lp_preview_ex(\'categoriaIds\',\''+id+'\',false)">🗂️ '+lp_esc(nombreDe(cats,id))+' ✕</span>';}).join('')
+    +ex.proveedorIds.map(function(id){return '<span class="badge b-warn" style="cursor:pointer" onclick="lp_preview_ex(\'proveedorIds\',\''+id+'\',false)">🚚 '+lp_esc(nombreDe(provs,id))+' ✕</span>';}).join('')
+    +'</div>'
+    +'<div style="display:flex;gap:8px;align-items:center;margin-bottom:8px;flex-wrap:wrap"><input id="lp-pv-q" placeholder="Buscar producto, categoría o proveedor" value="'+lp_esc(f.q)+'" oninput="window._lp_filtro.q=this.value;lp_preview_render_tabla()" style="flex:1;min-width:200px"/>'
+    +'<label style="display:flex;gap:6px;align-items:center;margin:0;font-weight:400;font-size:13px"><input type="checkbox" style="width:auto" '+(f.soloCambian?'checked':'')+' onchange="window._lp_filtro.soloCambian=this.checked;lp_preview_render_tabla()"/> Solo los que cambian</label></div>'
+    +'<div id="lp-pv-tabla"></div>'
+    +'<div class="modal-footer"><button class="btn btn-ghost" onclick="closeModal()">Cancelar</button>'
+    +'<button class="btn btn-primary" onclick="lp_aplicar()"'+(cnt.cambia||cnt.excluido?'':' disabled')+'>Aplicar: '+cnt.cambia+' cambian'+(cnt.excluido?', '+cnt.excluido+' quedan manuales':'')+'</button></div>';
+  lp_preview_render_tabla();
+  if(mc) mc.scrollTop=scroll;
+  var qi=document.getElementById('lp-pv-q'); if(qi && document.activeElement!==qi && f.q){ qi.focus(); qi.setSelectionRange(f.q.length,f.q.length); }
+}
+function lp_preview_render_tabla(){
+  var items=window._lp_pv||[], f=window._lp_filtro, q=f.q.toLowerCase(), MAX=400;
+  var vis=items.filter(function(i){
+    var e=lp_preview_estado(i);
+    if(f.soloCambian && e!=='cambia' && e!=='excluido') return false;
+    return !q || (i.nombre+' '+i.sku+' '+(i.categoria||'')+' '+(i.proveedor||'')).toLowerCase().indexOf(q)>=0;
+  });
+  var est={cambia:'',igual:'<span class="badge b-gray">igual</span>',excluido:'<span class="badge b-warn">mantiene</span>',manual:'<span class="badge b-gray">manual</span>',sin_regla:'<span class="badge b-gray">sin regla</span>',sin_cotizacion:'<span class="badge b-red">sin cotización</span>'};
+  var el=document.getElementById('lp-pv-tabla'); if(!el) return;
+  el.innerHTML=tableWrap(['Mantener','Producto','Categoría','Proveedor','Costo','Antes','Después',''], vis.length?vis.slice(0,MAX).map(function(i){
+    var e=lp_preview_estado(i), editable=(i.estado==='cambia'||i.estado==='igual');
+    var porCatProv=i.estado==='excluido';
+    var dif=i.antes?Math.round((i.despues-i.antes)/i.antes*1000)/10:null;
+    return '<tr'+(e==='excluido'?' style="opacity:.65"':'')+'>'
+      +'<td>'+(editable?'<input type="checkbox" style="width:auto" '+(e==='excluido'?'checked ':'')+'onchange="lp_preview_ex_prod(\''+i.id+'\',this.checked)"/>':(porCatProv?'<input type="checkbox" style="width:auto" checked disabled title="Excluido por categoría o proveedor"/>':''))+'</td>'
+      +'<td>'+lp_esc(i.nombre)+' <span style="color:var(--text2);font-size:11px">'+lp_esc(i.sku)+'</span>'+(i.moneda==='USD'?' <span class="badge b-info">U$D</span>':'')+'</td>'
+      +'<td>'+lp_esc(i.categoria||'—')+'</td><td>'+lp_esc(i.proveedor||'—')+'</td>'
+      +'<td>$'+lp_num(i.costo)+'</td><td>$'+lp_num(i.antes)+'</td>'
+      +'<td style="font-weight:600">'+(e==='excluido'?'$'+lp_num(i.antes):'$'+lp_num(i.despues))+'</td>'
+      +'<td>'+(e==='cambia'&&dif!=null?'<span style="font-size:12px;color:'+(dif>=0?'var(--green)':'var(--red)')+'">'+(dif>=0?'+':'')+dif+'%</span>':(est[e]||''))+'</td></tr>';
+  }).join(''):emptyRow(8,'Nada para mostrar con este filtro.'))
+  +(vis.length>MAX?'<div style="font-size:12px;color:var(--text2);margin-top:6px">Mostrando '+MAX+' de '+vis.length+' — usá el buscador para encontrar el resto.</div>':'');
+}
+function lp_preview_ex_prod(id, on){
+  if(on) window._lp_ex.productoIds[id]=1; else delete window._lp_ex.productoIds[id];
+  lp_preview_render();
+}
+async function lp_preview_ex(campo, id, on){
+  var arr=window._lp_ex[campo];
+  var i=arr.indexOf(id);
+  if(on && i<0) arr.push(id);
+  if(!on && i>=0) arr.splice(i,1);
+  document.getElementById('lp-pv-tabla').innerHTML='<div class="loading-state"><div class="loading-icon">'+ICON_SPIN+'</div>Recalculando...</div>';
+  await lp_preview_cargar();
+}
+async function lp_aplicar(){
+  var ex=window._lp_ex;
+  var btns=document.querySelectorAll('#lp-pv-body .modal-footer button'); btns.forEach(function(b){b.disabled=true;});
+  var r=await apiPost('/api/v1/listas-precio/principal/aplicar',{excluir:{productoIds:Object.keys(ex.productoIds), categoriaIds:ex.categoriaIds, proveedorIds:ex.proveedorIds}});
+  if(r.error){ showToast(r.message||'Error','danger'); btns.forEach(function(b){b.disabled=false;}); return; }
+  closeModal();
+  window._lp_auto_cache=null;
+  showToast((r.message||'Listo')+' Desde ahora, cuando cambie un costo, el precio se recalcula solo.','ok',8000);
+  cfg_listas_rerender();
 }
 /* ── Tab Cupones (admin-only) — cada cupón decide si combina o no con el descuento total
    manual del PoS y con el descuento que el cliente ya tiene (Cliente.descuento o su lista

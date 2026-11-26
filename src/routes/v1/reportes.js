@@ -322,7 +322,7 @@ export default async function reportesRoutes(fastify) {
         where,
         include: {
           producto: { select: { id: true, nombre: true, sku: true, categoria: { select: { id: true, nombre: true } } } },
-          ticket: { select: { nro: true, fecha: true, cliente: { select: { nombre: true } } } },
+          ticket: { select: { nro: true, fecha: true, listaPrecioNombre: true, cliente: { select: { nombre: true } } } },
         },
         orderBy: { ticket: { fecha: 'desc' } },
         skip: (Number(page) - 1) * Number(limit),

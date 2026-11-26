@@ -14,7 +14,7 @@ import {
   filtroUbicacionContiene, compararUbicacion, nivelesUbicacionActivos,
 } from '../../lib/ubicacion.js'
 import { cotizacionDefault, conPreciosEnPesos, listaEnPesos, desdePesos, aPesos } from '../../lib/moneda.js'
-import { conPreciosListas, recalcularPrincipal, cargarConfigListas } from '../../lib/listasPrecio.js'
+import { conPreciosListas, recalcularPrincipal, cargarConfigListas, invalidarListas } from '../../lib/listasPrecio.js'
 
 // Include de las filas por sucursal que pide un listado: la de la sucursal en la que se mira el
 // stock y/o la de la que se quiere la ubicación (pueden ser la misma). null si no pide ninguna.
@@ -1553,6 +1553,7 @@ export default async function productosRoutes(fastify) {
       },
     })
     if (r.count === 0) return reply.status(404).send({ error: 'not_found', message: 'Categoría no encontrada.' })
+    invalidarListas(req.tenantId) // la jerarquía entra en el cálculo de reglas por categoría
     return prisma.categoria.findUnique({ where: { id: req.params.id } })
   })
 
