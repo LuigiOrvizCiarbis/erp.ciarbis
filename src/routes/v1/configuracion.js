@@ -275,17 +275,23 @@ export default async function configuracionRoutes(fastify) {
     if (!TABLA_COLS_KEYS.includes(tableKey)) {
       return reply.status(400).send({ error: 'validation_error', message: 'Tabla no reconocida.' })
     }
-    const { cols, order, widths, pinned } = req.body || {}
+    const { cols, order, widths, pinned, wrap } = req.body || {}
     if (!order || !Array.isArray(order)) {
       return reply.status(400).send({ error: 'validation_error', message: '"order" requerido (array).' })
     }
-    const valor = JSON.stringify({ cols: cols || {}, order, widths: widths || {}, pinned: (pinned || []).slice(0, 4) })
+    // V2.111.0: nombres propios de columna (máx. 40 caracteres c/u) — y "wrap", que el frontend ya
+    // mandaba pero se perdía al guardar.
+    const labels = {}
+    for (const [k, v] of Object.entries((req.body && req.body.labels) || {})) {
+      if (typeof v === 'string' && v.trim()) labels[String(k).slice(0, 80)] = v.trim().slice(0, 40)
+    }
+    const valor = JSON.stringify({ cols: cols || {}, order, widths: widths || {}, pinned: (pinned || []).slice(0, 4), wrap: wrap || {}, labels })
     await prisma.configuracionEmpresa.upsert({
       where: { tenantId_clave: { tenantId: req.tenantId, clave: 'tabla.cols.' + tableKey } },
       update: { valor },
       create: { tenantId: req.tenantId, clave: 'tabla.cols.' + tableKey, valor },
     })
-    return { tableKey, cols: cols || {}, order, widths: widths || {}, pinned: (pinned || []).slice(0, 4) }
+    return { tableKey, cols: cols || {}, order, widths: widths || {}, pinned: (pinned || []).slice(0, 4), wrap: wrap || {}, labels }
   })
 
   // ── Métodos de pago activos en Caja/PoS ────────────────────

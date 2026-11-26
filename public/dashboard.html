@@ -904,11 +904,11 @@ body.ia-on #soporte-chat-panel{bottom:144px}
       <div class="sidebar-version">
         <div class="sidebar-version-full">
           <div style="opacity:.75">Powered by BIMS ERP</div>
-          <div>V2.110.0</div>
+          <div>V2.111.0</div>
         </div>
         <div class="sidebar-version-mini">
           <div>CIARBIS©</div>
-          <div>V2.110.0</div>
+          <div>V2.111.0</div>
         </div>
       </div>
     </div>
@@ -2439,6 +2439,8 @@ function tcol_estado_cargar(tableKey, columnas){
     // true = ajustar a 2 líneas (la fila crece), false/ausente = truncar con "..." en una línea.
     // Solo importa una vez que la columna tiene un ancho angosto seteado (ver tcol_td_style_wrap).
     wrap: (guardado && guardado.wrap) || {},
+    // V2.111.0: nombre visible propio por columna (ej. "Precio" → "CF"), lo pone el admin desde ⚙ Columnas.
+    labels: (guardado && guardado.labels) || {},
   };
   if(backend) localStorage.setItem(storageKey, JSON.stringify(state)); // sincroniza la caché local con el server
   return state;
@@ -2461,7 +2463,15 @@ function tcol_columnas_visibles(columnas, state){
   var porKey={}; columnas.forEach(function(c){porKey[c.key]=c;});
   var fijas=columnas.filter(function(c){return c.fixed;});
   var resto=state.order.filter(function(k){return state.cols[k];}).map(function(k){return porKey[k];}).filter(Boolean);
-  return fijas.concat(resto);
+  return fijas.concat(resto).map(function(c){ return tcol_label(c, state)===c.label ? c : Object.assign({}, c, {label:tcol_label(c, state)}); });
+}
+function tcol_label(c, state){ var l=state&&state.labels&&state.labels[c.key]; return l?tcol_esc(l):c.label; }
+function tcol_esc(s){ return String(s).replace(/[&<>"']/g,function(x){return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[x];}); }
+// Lápiz del panel ⚙ Columnas: cambia el nombre por un input en el lugar; Enter/salir guarda.
+function tcol_label_editar(btn, key, onLabelFn, actual){
+  var cont=btn.parentNode.querySelector('.tcol-label-txt'); if(!cont) return;
+  cont.innerHTML='<input type="text" maxlength="40" value="'+tcol_esc(actual)+'" style="width:140px;padding:2px 6px;font-size:12px" onclick="event.stopPropagation()" onkeydown="if(event.key===\'Enter\')this.blur();if(event.key===\'Escape\'){this.value=this.defaultValue;this.blur();}" onblur="'+onLabelFn+'(\''+key+'\',this.value)"/>';
+  var i=cont.querySelector('input'); i.focus(); i.select();
 }
 // Offset en px para `position:sticky;left:` de una columna fijada — suma el ancho de cada
 // columna fijada que la precede visualmente (default 130px si nunca se le fijó ancho a mano).
@@ -2539,14 +2549,15 @@ function tcol_td_style_wrap(tdHtml, state, visibles, colKey, baseOffset){
   }
   return '<td'+newAttrs+'>'+inner+'</td>';
 }
-function tcol_panel_html(panelId, columnas, state, onToggleFn, onMoverFn){
+function tcol_panel_html(panelId, columnas, state, onToggleFn, onMoverFn, onLabelFn){
   var porKey={}; columnas.forEach(function(c){porKey[c.key]=c;});
   var claves=state.order;
   return '<div id="'+panelId+'" style="display:none;flex-direction:column;position:absolute;top:100%;right:0;z-index:20;background:var(--surface);border:1px solid var(--border);border-radius:8px;padding:10px;margin-top:4px;box-shadow:0 4px 16px rgba(0,0,0,.3);white-space:nowrap;min-width:230px">'
     +(claves.length?claves.map(function(k,i){
       var c=porKey[k]; if(!c) return '';
       return '<div style="display:flex;align-items:center;gap:4px;font-size:13px;padding:3px 0">'
-        +'<label style="display:flex;align-items:center;gap:6px;cursor:pointer;flex:1"><input type="checkbox" '+(state.cols[k]?'checked':'')+' onchange="'+onToggleFn+'(\''+k+'\',this.checked)"/>'+c.label+'</label>'
+        +'<label style="display:flex;align-items:center;gap:6px;cursor:pointer;flex:1"><input type="checkbox" '+(state.cols[k]?'checked':'')+' onchange="'+onToggleFn+'(\''+k+'\',this.checked)"/><span class="tcol-label-txt">'+tcol_label(c,state)+'</span></label>'
+        +(onLabelFn?'<button type="button" class="btn-icon" style="padding:2px 6px" title="Cambiar el nombre de la columna" onclick="event.stopPropagation();tcol_label_editar(this,\''+k+'\',\''+onLabelFn+'\',this.getAttribute(\'data-l\'))" data-l="'+tcol_esc((state.labels&&state.labels[k])||c.label.replace(/<[^>]*>/g,''))+'">✎</button>':'')
         +'<button type="button" class="btn-icon" style="padding:2px 6px;'+(i===0?'visibility:hidden':'')+'" onclick="'+onMoverFn+'(\''+k+'\',-1)" title="Subir">▲</button>'
         +'<button type="button" class="btn-icon" style="padding:2px 6px;'+(i===claves.length-1?'visibility:hidden':'')+'" onclick="'+onMoverFn+'(\''+k+'\',1)" title="Bajar">▼</button>'
         +'</div>';
@@ -2945,7 +2956,7 @@ MODULES.inventario = async function(){
 // tiene que refrescar ESTE contenedor además del de la tabla para que el panel (si está
 // abierto) muestre el estado actualizado.
 function inv_colbtn_html(){
-  return tcol_boton_html('inv-colpanel')+tcol_panel_html('inv-colpanel',inv_columnas(),window._invCols,'inv_col_toggle','inv_col_mover');
+  return tcol_boton_html('inv-colpanel')+tcol_panel_html('inv-colpanel',inv_columnas(),window._invCols,'inv_col_toggle','inv_col_mover','inv_col_label');
 }
 // Unidad para mostrar el stock de productos "por peso" — un mismo tenant puede tener
 // productos cargados en gramos y otros en kg, lo que hace difícil comparar de un vistazo
@@ -3009,6 +3020,12 @@ var INV_PRODUCTOS_COLUMNAS=[
   {key:'min', label:'Mín.', default:true},
   {key:'costo', label:'Costo', default:true},
   {key:'precio', label:'Precio', default:true},
+  // V2.111.0: costo y precio en cada moneda, para comparar (los de dólares se calculan con la
+  // cotización default si el producto está en pesos, y al revés).
+  {key:'costoArs', label:'Costo AR$', default:false},
+  {key:'costoUsd', label:'Costo U$D', default:false},
+  {key:'precioUsd', label:'Precio U$D', default:false},
+  {key:'precioArs', label:'Precio AR$', default:false},
   {key:'totalCosto', label:'Total costo', default:true},
   {key:'categoria', label:'Categoría', default:false},
   {key:'proveedor', label:'Proveedor', default:false},
@@ -3039,6 +3056,21 @@ function inv_listas_columnas(listas){
   nuevas.forEach(function(c,k){ INV_PRODUCTOS_COLUMNAS.splice(idx+k,0,c); });
   if(nuevas.map(function(c){return c.key;}).join(',')!==antes) window._invCols=null; // se re-arma el estado de columnas
 }
+// Monto de costo/precio en una moneda puntual (sin importar la vista ARS/USD de arriba).
+// La API ya manda precioCosto/precioVenta en pesos; los productos en U$D traen además *Orig.
+function inv_monto_moneda(x, campo, moneda){
+  if(x[campo]==null) return null;
+  var pesos=Number(x[campo]||0);
+  if(moneda==='ARS') return pesos;
+  if(prod_es_usd(x) && x[campo+'Orig']!=null) return Number(x[campo+'Orig']);
+  var cot=cotizacion_default_valor();
+  return cot>0 ? Math.round(pesos/cot*100)/100 : null;
+}
+function inv_fmt_moneda(n, moneda){
+  if(n==null) return '—';
+  return moneda==='USD' ? fmtUSD(n) : '$'+Number(n).toLocaleString('es-AR',{minimumFractionDigits:2,maximumFractionDigits:2});
+}
+var INV_COLS_MONEDA={costoArs:['precioCosto','ARS'], costoUsd:['precioCosto','USD'], precioArs:['precioVenta','ARS'], precioUsd:['precioVenta','USD']};
 // IVA % de un producto (o de la variante, que hereda el de su producto).
 function inv_iva_pct(x){ var n=Number(x&&x.impuesto!=null?x.impuesto:(x&&x._ivaPadre!=null?x._ivaPadre:21)); return isNaN(n)?21:n; }
 function inv_precio_lista_iva(x, key){
@@ -3117,6 +3149,16 @@ function inv_col_toggle(key, checked){
   tcol_estado_guardar(INV_TABLE_KEY, window._invCols);
   inv_colpanel_refrescar(abierto);
 }
+// Nombre propio de una columna (vacío = vuelve al nombre de siempre).
+function inv_col_label(key, valor){
+  var abierto=tcol_estaba_abierto('inv-colpanel');
+  var st=window._invCols; st.labels=st.labels||{};
+  var v=String(valor||'').trim().slice(0,40);
+  var def=(inv_columnas().find(function(c){return c.key===key;})||{}).label||'';
+  if(!v || v===def.replace(/<[^>]*>/g,'')) delete st.labels[key]; else st.labels[key]=v;
+  tcol_estado_guardar(INV_TABLE_KEY, st);
+  inv_colpanel_refrescar(abierto);
+}
 function inv_col_mover(key, dir){
   var abierto=tcol_estaba_abierto('inv-colpanel');
   tcol_mover(window._invCols, key, dir);
@@ -3165,6 +3207,7 @@ function inv_col_getter(p,key){
       if(key.indexOf('lista_')===0){ var lv=inv_precio_lista(p,key); return lv==null?-Infinity:lv; }
       if(key.indexOf('listaiva_')===0){ var li=inv_precio_lista_iva(p,key); return li==null?-Infinity:li; }
       if(key==='ivapct') return inv_iva_pct(p);
+      if(INV_COLS_MONEDA[key]){ var mm=inv_monto_moneda(p, INV_COLS_MONEDA[key][0], INV_COLS_MONEDA[key][1]); return mm==null?-Infinity:mm; }
       if(key.indexOf('ubic_')===0) return ubic_orden_clave((p.ubicacion||{})[key.slice(5)]);
       return '';
   }
@@ -3231,6 +3274,7 @@ function inv_tabla_html(prods){
           if(c.key.indexOf('lista_')===0){ var lp=inv_precio_lista(p,c.key); return '<td>'+(lp==null?'—':fmtPeso(lp))+(p.ventaPorPeso&&lp!=null?'<span style="color:var(--text2)">/kg</span>':'')+'</td>'; }
           if(c.key.indexOf('listaiva_')===0){ var lpi=inv_precio_lista_iva(p,c.key); return '<td style="font-weight:600">'+(lpi==null?'—':fmtPeso(lpi))+'</td>'; }
           if(c.key==='ivapct') return inv_iva_celda_html(p);
+          if(INV_COLS_MONEDA[c.key]){ var cm=INV_COLS_MONEDA[c.key]; return '<td>'+inv_fmt_moneda(inv_monto_moneda(p, cm[0], cm[1]), cm[1])+'</td>'; }
           if(c.key.indexOf('ubic_')===0){ var uv=(p.ubicacion||{})[c.key.slice(5)]; return uv?'<td class="mono" style="font-weight:600">'+imp_esc(uv)+'</td>':'<td style="color:var(--text3)">—</td>'; }
           return '<td>—</td>';
       }
@@ -3294,6 +3338,7 @@ function inv_variante_fila_html(v, state, visibles){
         if(c.key.indexOf('lista_')===0){ var vl=inv_precio_lista(v,c.key); return '<td style="font-size:12px">'+(vl==null?'—':fmtPeso(vl))+'</td>'; }
         if(c.key.indexOf('listaiva_')===0){ var vli=inv_precio_lista_iva(v,c.key); return '<td style="font-size:12px">'+(vli==null?'—':fmtPeso(vli))+'</td>'; }
         if(c.key==='ivapct') return '<td style="font-size:12px;color:var(--text2)">'+lp_num(inv_iva_pct(v))+'%</td>';
+        if(INV_COLS_MONEDA[c.key]){ var vm=INV_COLS_MONEDA[c.key]; return '<td style="font-size:12px">'+inv_fmt_moneda(inv_monto_moneda(v, vm[0], vm[1]), vm[1])+'</td>'; }
         // Ubicación: la propia de la variante en negro; la heredada del producto, en gris.
         if(c.key.indexOf('ubic_')===0){
           var nk=c.key.slice(5), propia=(v.ubicacion||{})[nk], efect=(v.ubicacionEfectiva||{})[nk];
@@ -14396,6 +14441,10 @@ function cfg_tab_render(content, tab){
 // reescribe retroactivamente toda la historia vieja). Cada bump agrega una entrada arriba de
 // todo (más nueva primero) — además de loggear el detalle técnico en la memoria de siempre.
 var VERSIONES_CHANGELOG = [
+  { v:'2.111.0', fecha:'26/11/2026', cambios:[
+    'Inventario > ⚙ Columnas: nuevas columnas Costo AR$, Costo U$D, Precio U$D y Precio AR$ para ver los dos valores a la vez (con la cotización del día).',
+    'Ahora podés cambiarle el nombre a cualquier columna de Inventario con el lápiz ✎ del panel ⚙ Columnas (ej. "Precio" → "CF", "Precio de lista" → "Lista"). Vacío vuelve al nombre original.',
+  ]},
   { v:'2.110.0', fecha:'26/11/2026', cambios:[
     'Nuevo "Actualizar precios" en Inventario: subís uno o varios Excel (ej. Consumidor Final y Farmacias), elegís a qué lista va cada uno, revisás antes → después y confirmás. Solo cambia precios (no toca stock ni costos) y respeta el precio exacto del Excel.',
     'Listas de precio "+IVA": para listas que se manejan sin IVA (farmacias, mayoristas). En Inventario ves precio sin IVA, IVA % y precio con IVA, que se calcula solo.',
