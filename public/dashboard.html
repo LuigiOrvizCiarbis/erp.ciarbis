@@ -13972,6 +13972,18 @@ function cfg_tab_render(content, tab){
 // reescribe retroactivamente toda la historia vieja). Cada bump agrega una entrada arriba de
 // todo (más nueva primero) — además de loggear el detalle técnico en la memoria de siempre.
 var VERSIONES_CHANGELOG = [
+  { v:'2.108.0', fecha:'26/11/2026', cambios:[
+    'Listas de precio automáticas: en Ajustes > Listas de precio definís tu ganancia sobre el costo (ej. +30%) y, cada vez que cambia un costo, el precio de venta se actualiza solo.',
+    'Reglas distintas por categoría, proveedor, categoría + proveedor o productos puntuales (ej. Buzos de Juan +30%, Sweaters de Pedro +25%), con % , $ fijo o precio manual. Siempre gana la más específica.',
+    'Antes de cambiar precios ves una vista previa (antes → después) y elegís qué productos, categorías o proveedores mantienen su precio: quedan como "precio manual" ✋.',
+    'Listas extra (mayorista, revendedor…) sobre tu precio o sobre el costo, ej. Lista B −10%. Se eligen en Caja, se ven como columnas en Inventario y se imprimen en etiquetas.',
+    'Cada venta guarda con qué lista se cobró (solo para vos, no sale en el ticket ni en la factura).',
+  ]},
+  { v:'2.107.0', fecha:'10/11/2026', cambios:[
+    'Nuevo módulo Producción: recetas (con merma), órdenes de producción, tablero por etapas arrastrable y planificación de insumos que te arma la orden de compra de lo que falta.',
+    'Al iniciar una producción se descuentan los insumos del stock, y al completarla entra el producto terminado con su costo real (y lote/vencimiento si lo usás).',
+    'Fichaje y Auditoría ahora se pueden ocultar desde Ajustes > Módulos si no los usás.',
+  ]},
   { v:'2.106.0', fecha:'21/10/2026', cambios:[
     'Precios en dólares: cada producto puede tener su costo y precio cargados en U$D. Inventario, Caja, tickets y etiquetas los muestran y cobran en pesos con la cotización del dólar que tengas marcada como default (ej. la Manual) — si la cambiás, todos esos precios se actualizan solos.',
     'Importar Excel: elegís si la columna de costo y la de precio vienen en AR$ o U$D, y nueva columna Categoría que acepta subcategorías (ej. "Prensatelas > Singer") y crea las que falten.',
@@ -13985,6 +13997,16 @@ var VERSIONES_CHANGELOG = [
     'Ubicación en depósito: cargá Pasillo, Estante y Cajón (ej. P1 · E3 · C102) a cada producto y, si hace falta, a cada variante — por sucursal. Se prende en Configuración > Variantes, y los niveles se pueden renombrar u ocultar.',
     'Inventario muestra la ubicación en 3 columnas (ocultables desde ⚙ Columnas) y el buscador también encuentra por ubicación. La Caja muestra dónde está cada producto, "Imprimir stock" se puede ordenar por ubicación para recorrer el local, y la etiqueta puede incluirla.',
     'Importar Excel acepta columnas Pasillo / Estante / Cajón para cargar todas las ubicaciones de una.',
+  ]},
+  { v:'2.104.0', fecha:'16/10/2026', cambios:[
+    'Stock por sucursal: el producto se carga una sola vez y cada sucursal tiene su propio stock. En "Todas" ves el total; parado en una sucursal, solo el de esa.',
+    'Nuevo botón ⇄ Transferir para mover mercadería entre sucursales (también por talle/color).',
+    'La Caja vende y descuenta del stock de su propia sucursal.',
+  ]},
+  { v:'2.102.0', fecha:'15/10/2026', cambios:[
+    'Nuevo módulo Taller (Armado, Reparaciones y Garantía): ingreso del equipo con el cliente, qué deja y qué se lleva, tablero por estado, presupuesto por WhatsApp e informe.',
+    'Etiqueta interna con número de orden para escanear, y comprobante de ingreso y de entrega por la impresora de tickets o en PDF.',
+    'Se prende y apaga desde Ajustes > Módulos.',
   ]},
   { v:'2.101.0', fecha:'07/10/2026', cambios:[
     'Todo el sistema responde más rápido: cada pantalla hace menos viajes a la base de datos al cargar.',

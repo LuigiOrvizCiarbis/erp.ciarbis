@@ -240,9 +240,15 @@
       <p>El sistema permite configurar variantes de producto como peso, talla o sabor.</p>
 
       <h3>Lista de precio</h3>
-      <p>Se pueden gestionar diversas listas de precios para distintos tipos de clientes (mayorista,
-      minorista, distribuidor). Además, se pueden crear categorías y subcategorías y aplicar
-      márgenes de ganancia predeterminados a nivel general o por categoría.</p>
+      <p>La <strong>lista principal</strong> calcula el precio de venta desde el costo (ej. costo +30%): cada vez
+      que cambia un costo, el precio se actualiza solo. Se pueden cargar reglas distintas por categoría,
+      proveedor, categoría + proveedor o productos puntuales, en %, en $ fijo o con un precio manual
+      (siempre gana la regla más específica). Con "Vista previa y aplicar" se ven los precios antes y
+      después, y se puede elegir qué productos mantienen su precio actual (quedan como precio manual ✋).</p>
+      <p>Además se pueden crear <strong>listas secundarias</strong> para distintos tipos de clientes (mayorista,
+      revendedor, distribuidor), calculadas sobre la lista principal o sobre el costo. Se eligen en la Caja
+      (o se aplican solas al cliente que tiene una lista asignada), se ven como columnas en Inventario y se
+      pueden imprimir en las etiquetas. Cada venta guarda con qué lista se cobró, como nota interna.</p>
 
       <h3>Cupones</h3>
       <p>Es posible crear cupones de descuento con vigencia definida, límites de uso total y
