@@ -15,6 +15,7 @@
     "db:reset": "prisma migrate reset --force"
   },
   "dependencies": {
+    "@anthropic-ai/sdk": "1.7.0",
     "@fastify/cors": "^11.3.1",
     "@fastify/jwt": "^10.2.4",
     "@fastify/multipart": "^10.1.4",

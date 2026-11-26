@@ -67,6 +67,7 @@ async function main() {
   const soporteRoutes = (await import('./src/routes/v1/soporte.js')).default
   const tallerRoutes = (await import('./src/routes/v1/taller.js')).default
   const produccionRoutes = (await import('./src/routes/v1/produccion.js')).default
+  const iaRoutes = (await import('./src/routes/v1/ia.js')).default
 
   const app = Fastify({ logger: { level: 'warn' }, trustProxy: true })
 
@@ -142,6 +143,7 @@ async function main() {
   await app.register(soporteRoutes, v1)
   await app.register(tallerRoutes, v1)
   await app.register(produccionRoutes, v1)
+  await app.register(iaRoutes, v1)
 
   app.get('/health', async () => ({
     status: 'ok', version: '2.0.0',

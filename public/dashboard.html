@@ -708,6 +708,39 @@ tr:hover td{background:rgba(255,255,255,.015)}
   #soporte-chat-btn{bottom:80px;width:46px;height:46px;font-size:20px}
   #soporte-chat-panel{bottom:134px;right:12px;left:12px;width:auto;max-width:none}
 }
+/* ── BIMS IA (V2.109.0): chat flotante con el asistente. Oculto hasta que /ia/estado diga disponible. */
+#ia-chat-btn{display:none;position:fixed;bottom:24px;right:20px;z-index:150;height:48px;padding:0 18px 0 14px;border-radius:24px;background:linear-gradient(135deg,var(--accent),#7C3AED);color:#fff;align-items:center;gap:8px;font-size:14px;font-weight:700;cursor:pointer;box-shadow:0 6px 20px rgba(30,64,255,.35);transition:transform .15s;user-select:none}
+#ia-chat-btn.visible{display:flex}
+#ia-chat-btn:hover{transform:translateY(-2px)}
+#ia-chat-panel{display:none;position:fixed;bottom:84px;right:20px;z-index:152;width:400px;max-width:calc(100vw - 32px);height:min(640px,calc(100vh - 120px));background:var(--surface);border:1px solid var(--border);border-radius:16px;box-shadow:0 12px 40px rgba(0,0,0,.4);flex-direction:column;overflow:hidden}
+#ia-chat-panel.abierto{display:flex}
+.ia-head{display:flex;align-items:center;gap:8px;padding:12px 14px;border-bottom:1px solid var(--border);background:var(--surface2)}
+.ia-msgs{flex:1;overflow-y:auto;padding:14px;display:flex;flex-direction:column;gap:10px}
+.ia-msg{max-width:88%;padding:9px 12px;border-radius:12px;font-size:13.5px;line-height:1.45;word-wrap:break-word}
+.ia-msg.user{align-self:flex-end;background:var(--accent);color:#fff;border-bottom-right-radius:4px;white-space:pre-wrap}
+.ia-msg.bot{align-self:flex-start;background:var(--surface2);border:1px solid var(--border);border-bottom-left-radius:4px}
+.ia-msg.bot p{margin:0 0 6px}.ia-msg.bot p:last-child{margin:0}
+.ia-msg.bot ul{margin:4px 0 6px 18px;padding:0}.ia-msg.bot li{margin:2px 0}
+.ia-msg.bot table{border-collapse:collapse;font-size:12px;margin:6px 0;width:100%}
+.ia-msg.bot th,.ia-msg.bot td{border:1px solid var(--border);padding:4px 6px;text-align:left}
+.ia-msg.bot code{font-family:var(--mono);font-size:12px;background:var(--input-bg);padding:1px 4px;border-radius:4px}
+.ia-msg.err{align-self:flex-start;background:rgba(220,38,38,.1);border:1px solid rgba(220,38,38,.35);color:var(--text)}
+.ia-chip{display:block;width:100%;text-align:left;background:var(--input-bg);border:1px solid var(--border);border-radius:10px;padding:8px 10px;font-size:12.5px;color:var(--text);cursor:pointer;margin-bottom:6px;font-family:var(--font)}
+.ia-chip:hover{border-color:var(--accent)}
+.ia-input{display:flex;gap:8px;padding:10px;border-top:1px solid var(--border)}
+.ia-input textarea{flex:1;resize:none;background:var(--input-bg);border:1px solid var(--border);border-radius:10px;color:var(--text);padding:9px 10px;font-size:13.5px;font-family:var(--font);max-height:120px}
+.ia-pensando span{display:inline-block;width:6px;height:6px;margin-right:3px;border-radius:50%;background:var(--text2);animation:iaPunto 1.2s infinite}
+.ia-pensando span:nth-child(2){animation-delay:.2s}.ia-pensando span:nth-child(3){animation-delay:.4s}
+@keyframes iaPunto{0%,80%,100%{opacity:.25}40%{opacity:1}}
+body.ia-on #soporte-chat-btn{bottom:84px}
+body.ia-on #soporte-chat-panel{bottom:144px}
+@media(max-width:768px){
+  #ia-chat-btn{bottom:76px;right:12px;height:44px;padding:0 14px 0 12px;font-size:13px}
+  body[data-modulo="pos"] #ia-chat-btn{bottom:124px}
+  #ia-chat-panel{left:8px;right:8px;bottom:72px;width:auto;max-width:none;height:calc(100vh - 140px)}
+  body.ia-on #soporte-chat-btn{bottom:128px}
+  body.ia-on #soporte-chat-panel{bottom:180px}
+}
 .pos-cart-bar{display:none}
 .pos-caja-volver{display:none}
 @media(max-width:768px){
@@ -871,11 +904,11 @@ tr:hover td{background:rgba(255,255,255,.015)}
       <div class="sidebar-version">
         <div class="sidebar-version-full">
           <div style="opacity:.75">Powered by BIMS ERP</div>
-          <div>V2.108.0</div>
+          <div>V2.109.0</div>
         </div>
         <div class="sidebar-version-mini">
           <div>CIARBIS©</div>
-          <div>V2.108.0</div>
+          <div>V2.109.0</div>
         </div>
       </div>
     </div>
@@ -889,6 +922,9 @@ tr:hover td{background:rgba(255,255,255,.015)}
        un ticket que llega al panel /superadmin, alguien de soporte responde por fuera. -->
   <div id="soporte-chat-btn" onclick="soporte_chat_toggle()" title="Ayuda / Soporte">💬</div>
   <div id="soporte-chat-panel"></div>
+  <!-- BIMS IA (V2.109.0) — asistente: ayuda de uso + preguntas del negocio con datos reales. -->
+  <div id="ia-chat-btn" onclick="ia_toggle()" title="Preguntale a BIMS IA">✨ <span>BIMS IA</span></div>
+  <div id="ia-chat-panel"></div>
 </div>
 
 <!-- MOBILE NAV -->
@@ -1423,6 +1459,7 @@ function loginUser(user){
   // Chat de Ayuda/Soporte — oculto salvo para el usuario de prueba, ver soporte_chat_disponible()
   var chatBtn = document.getElementById('soporte-chat-btn');
   if(chatBtn) chatBtn.classList.toggle('visible', soporte_chat_disponible());
+  ia_disponibilidad();
 
   // Selector de sucursal (solo admin, y sólo si hay más de una) — filtra la vista de
   // Inventario/Ventas/Reportes sin tocar el sucursalId fijo del usuario.
@@ -2061,6 +2098,7 @@ function showModule(mod, arg, _desdePopstate){
     return;
   }
   currentModule = mod;
+  document.body.setAttribute('data-modulo', mod); // ej. el botón de BIMS IA se corre arriba de la barra del carrito en Caja mobile
   if(!_desdePopstate){
     var nuevaRuta = mod==='home' ? '/dashboard' : '/dashboard/'+mod;
     if(location.pathname!==nuevaRuta) history.pushState({mod:mod}, '', nuevaRuta);
@@ -2152,6 +2190,110 @@ document.addEventListener('click', function(e){
   var panel=document.getElementById('soporte-chat-panel');
   if(btn && panel && panel.style.display==='block' && !btn.contains(e.target) && !panel.contains(e.target)) panel.style.display='none';
 });
+
+/* ═══════════════════════════════════════
+   BIMS IA (V2.109.0) — chat flotante con el asistente (Claude). Dos usos: cómo se hace algo en
+   el sistema, y preguntas del negocio con datos reales (stock, ventas, clientes, compras), según
+   los permisos del rol. Backend: /api/v1/ia (src/lib/bimsIa.js). La conversación vive en este
+   navegador (sessionStorage); al server solo viaja el texto de la charla.
+═══════════════════════════════════════ */
+var IA_KEY_HIST='bims_ia_hist';
+var IA_EJEMPLOS={
+  ayuda:['¿Cómo cargo un producto con talles y colores?','¿Cómo hago para que el precio se actualice solo cuando cambia el costo?','¿Cómo divido un pago entre efectivo y QR en la Caja?'],
+  negocio:['¿Cómo viene mi stock de vestidos rojos talle L en la sucursal principal?','¿Cuánto vendí esta semana y qué fue lo más vendido?','¿Qué clientes me deben plata?'],
+};
+async function ia_disponibilidad(){
+  var r=await apiGet('/api/v1/ia/estado').catch(function(){return null;});
+  var ok=!!(r && r.disponible);
+  var btn=document.getElementById('ia-chat-btn');
+  if(btn) btn.classList.toggle('visible', ok);
+  document.body.classList.toggle('ia-on', ok);
+}
+function ia_hist(){ try{ return JSON.parse(sessionStorage.getItem(IA_KEY_HIST)||'[]'); }catch(e){ return []; } }
+function ia_hist_guardar(h){ try{ sessionStorage.setItem(IA_KEY_HIST, JSON.stringify(h.slice(-30))); }catch(e){} }
+function ia_toggle(forzar){
+  var p=document.getElementById('ia-chat-panel'); if(!p) return;
+  var abrir = forzar!==undefined ? forzar : !p.classList.contains('abierto');
+  p.classList.toggle('abierto', abrir);
+  if(abrir){ ia_render(); setTimeout(function(){ var t=document.getElementById('ia-txt'); if(t) t.focus(); }, 50); }
+}
+function ia_esc(s){ return String(s==null?'':s).replace(/[&<>"']/g,function(c){return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c];}); }
+// Markdown mínimo y seguro (se escapa TODO primero): **negrita**, `código`, listas, tablas, títulos.
+function ia_md(txt){
+  var lineas=ia_esc(txt).split('\n'), out=[], lista=false, tabla=null;
+  var inline=function(l){ return l.replace(/\*\*(.+?)\*\*/g,'<strong>$1</strong>').replace(/`([^`]+)`/g,'<code>$1</code>').replace(/(^|[^*])\*([^*\n]+)\*/g,'$1<em>$2</em>').replace(/(^|\s)_([^_\n]+)_(?=\s|$|[.,;:])/g,'$1<em>$2</em>'); };
+  var cerrar=function(){ if(lista){ out.push('</ul>'); lista=false; } if(tabla){ out.push('<table>'+tabla.join('')+'</table>'); tabla=null; } };
+  lineas.forEach(function(l){
+    var t=l.trim();
+    if(/^\|.*\|$/.test(t)){
+      if(/^\|[\s:\-|]+\|$/.test(t)) return;
+      if(lista){ out.push('</ul>'); lista=false; }
+      var celdas=t.slice(1,-1).split('|').map(function(c){return inline(c.trim());});
+      if(!tabla){ tabla=['<tr>'+celdas.map(function(c){return '<th>'+c+'</th>';}).join('')+'</tr>']; }
+      else tabla.push('<tr>'+celdas.map(function(c){return '<td>'+c+'</td>';}).join('')+'</tr>');
+      return;
+    }
+    if(tabla){ out.push('<table>'+tabla.join('')+'</table>'); tabla=null; }
+    var m=t.match(/^([-*•]|\d+[.)])\s+(.*)$/);
+    if(m){ if(!lista){ out.push('<ul>'); lista=true; } out.push('<li>'+inline(m[2])+'</li>'); return; }
+    cerrar();
+    if(!t) return;
+    var h=t.match(/^#{1,4}\s+(.*)$/);
+    out.push(h?'<p><strong>'+inline(h[1])+'</strong></p>':'<p>'+inline(t)+'</p>');
+  });
+  cerrar();
+  return out.join('');
+}
+function ia_render(pensando){
+  var p=document.getElementById('ia-chat-panel'); if(!p) return;
+  var h=ia_hist();
+  var txtPrev=(document.getElementById('ia-txt')||{}).value||'';
+  var cuerpo;
+  if(!h.length){
+    var chips=function(arr){ return arr.map(function(q){ return '<button type="button" class="ia-chip" data-q="'+ia_esc(q)+'" onclick="ia_enviar(this.dataset.q)">'+ia_esc(q)+'</button>'; }).join(''); };
+    cuerpo='<div style="font-size:13px;color:var(--text2);margin-bottom:12px">Hola'+(currentUser&&currentUser.nombre?' '+ia_esc(String(currentUser.nombre).split(' ')[0]):'')+' 👋 Soy <strong style="color:var(--text)">BIMS IA</strong>. Preguntame cómo hacer algo en el sistema, o consultame datos de tu negocio.</div>'
+      +'<div style="font-size:11px;font-weight:700;color:var(--text2);text-transform:uppercase;letter-spacing:.04em;margin:4px 0 6px">💡 Cómo se usa el sistema</div>'+chips(IA_EJEMPLOS.ayuda)
+      +'<div style="font-size:11px;font-weight:700;color:var(--text2);text-transform:uppercase;letter-spacing:.04em;margin:12px 0 6px">📊 Tu negocio</div>'+chips(IA_EJEMPLOS.negocio);
+  } else {
+    cuerpo=h.map(function(m){
+      if(m.role==='user') return '<div class="ia-msg user">'+ia_esc(m.content)+'</div>';
+      return '<div class="ia-msg '+(m.error?'err':'bot')+'">'+ia_md(m.content)+'</div>';
+    }).join('')+(pensando?'<div class="ia-msg bot"><span class="ia-pensando"><span></span><span></span><span></span></span> <span style="font-size:12px;color:var(--text2)">Consultando…</span></div>':'');
+  }
+  p.innerHTML='<div class="ia-head"><span style="font-size:18px">✨</span><div style="flex:1"><div style="font-weight:700;font-size:14px">BIMS IA</div><div style="font-size:11px;color:var(--text2)">Asistente de tu ERP</div></div>'
+    +(h.length?'<button type="button" class="btn-icon" title="Nueva conversación" onclick="ia_nueva()">🗒️</button>':'')
+    +'<button type="button" class="btn-icon" title="Cerrar" onclick="ia_toggle(false)">✕</button></div>'
+    +'<div class="ia-msgs" id="ia-msgs">'+cuerpo+'</div>'
+    +'<div class="ia-input"><textarea id="ia-txt" rows="1" placeholder="Escribí tu pregunta…" onkeydown="ia_tecla(event)" oninput="this.style.height=\'auto\';this.style.height=Math.min(this.scrollHeight,120)+\'px\'"'+(pensando?' disabled':'')+'>'+ia_esc(txtPrev)+'</textarea>'
+    +'<button type="button" class="btn btn-primary btn-sm" onclick="ia_enviar()"'+(pensando?' disabled':'')+' style="align-self:flex-end">Enviar</button></div>'
+    +'<div style="font-size:10.5px;color:var(--text3,var(--text2));padding:0 12px 8px">Solo consulta, no modifica nada. Puede equivocarse: revisá los datos importantes.</div>';
+  var box=document.getElementById('ia-msgs'); if(box) box.scrollTop=box.scrollHeight;
+}
+function ia_tecla(e){ if(e.key==='Enter' && !e.shiftKey){ e.preventDefault(); ia_enviar(); } }
+function ia_nueva(){ ia_hist_guardar([]); ia_render(); }
+var _ia_enviando=false;
+async function ia_enviar(texto){
+  if(_ia_enviando) return;
+  var t=document.getElementById('ia-txt');
+  var q=(texto!==undefined?texto:(t?t.value:'')).trim();
+  if(!q) return;
+  if(t) t.value='';
+  var h=ia_hist(); h.push({role:'user', content:q.slice(0,4000)}); ia_hist_guardar(h);
+  _ia_enviando=true; ia_render(true);
+  // Al server solo va la charla real (los avisos de error locales no).
+  var mensajes=h.filter(function(m){ return !m.error; }).map(function(m){ return {role:m.role, content:m.content}; });
+  var r=await apiPost('/api/v1/ia/chat',{mensajes:mensajes}).catch(function(err){ return {error:true, message:(err&&err.message)||'Sin conexión'}; });
+  _ia_enviando=false;
+  h=ia_hist();
+  if(r && r.respuesta) h.push({role:'assistant', content:r.respuesta});
+  else {
+    h.push({role:'assistant', content:(r&&r.message)||'No pude responder. Probá de nuevo.', error:true});
+    // Sacamos la pregunta fallida del historial "real" para que se pueda reintentar limpio.
+    for(var i=h.length-2;i>=0;i--){ if(h[i].role==='user'){ h[i].error=true; break; } }
+  }
+  ia_hist_guardar(h);
+  ia_render();
+}
 
 /* ═══════════════════════════════════════
    MODAL HELPERS
@@ -13972,6 +14114,11 @@ function cfg_tab_render(content, tab){
 // reescribe retroactivamente toda la historia vieja). Cada bump agrega una entrada arriba de
 // todo (más nueva primero) — además de loggear el detalle técnico en la memoria de siempre.
 var VERSIONES_CHANGELOG = [
+  { v:'2.109.0', fecha:'26/11/2026', cambios:[
+    'Nuevo asistente BIMS IA ✨ (botón abajo a la derecha): preguntale cómo hacer cualquier cosa en el sistema y te explica paso a paso.',
+    'También responde sobre tu negocio con tus datos reales, ej. "¿cómo viene mi stock de vestidos rojos talle L en Güemes?", "¿cuánto vendí esta semana?" o "¿qué clientes me deben?".',
+    'Solo consulta (no modifica nada) y respeta los permisos de cada usuario. Incluido sin costo.',
+  ]},
   { v:'2.108.0', fecha:'26/11/2026', cambios:[
     'Listas de precio automáticas: en Ajustes > Listas de precio definís tu ganancia sobre el costo (ej. +30%) y, cada vez que cambia un costo, el precio de venta se actualiza solo.',
     'Reglas distintas por categoría, proveedor, categoría + proveedor o productos puntuales (ej. Buzos de Juan +30%, Sweaters de Pedro +25%), con % , $ fijo o precio manual. Siempre gana la más específica.',

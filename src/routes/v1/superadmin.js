@@ -7,6 +7,7 @@ import { randomBytes, timingSafeEqual } from 'crypto'
 import { prisma } from '../../lib/prisma.js'
 import { invalidarCacheAuth } from '../../lib/authCache.js'
 import { sanitizeModulos } from '../../lib/modulos.js'
+import { usoPorTenant, setIaDesactivada } from '../../lib/bimsIa.js'
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
 const DATA_DIR = join(__dirname, '../../../data')
@@ -223,6 +224,24 @@ export default async function superadminRoutes(fastify) {
     } catch (e) {
       return reply.status(404).send({ error: 'not_found', message: 'Tenant no encontrado.' })
     }
+  })
+
+  // ── BIMS IA (V2.109.0): consumo por empresa (tokens + U$D del mes) y apagado por empresa ──
+  fastify.get('/superadmin/ia/uso', async (req, reply) => {
+    if (!checkToken(req, reply)) return
+    const r = await usoPorTenant(req.query.mes)
+    const tenants = await prisma.tenant.findMany({ select: { id: true, nombre: true, activo: true }, orderBy: { nombre: 'asc' } })
+    const filas = tenants.map((t) => ({ tenantId: t.id, nombre: t.nombre, activo: t.activo, ...(r.porTenant[t.id] || { uso: null, desactivada: false }) }))
+    const total = filas.reduce((a, f) => ({ consultas: a.consultas + (f.uso?.consultas || 0), costoUSD: a.costoUSD + (f.uso?.costoUSD || 0) }), { consultas: 0, costoUSD: 0 })
+    return { ok: true, mes: r.mes, modelo: r.modelo, configurada: r.configurada, total: { consultas: total.consultas, costoUSD: Math.round(total.costoUSD * 100) / 100 }, filas }
+  })
+
+  fastify.patch('/superadmin/tenants/:id/ia', async (req, reply) => {
+    if (!checkToken(req, reply)) return
+    const t = await prisma.tenant.findUnique({ where: { id: req.params.id }, select: { id: true } })
+    if (!t) return reply.status(404).send({ error: 'not_found', message: 'Tenant no encontrado.' })
+    await setIaDesactivada(t.id, req.body?.activa === false)
+    return { ok: true, activa: req.body?.activa !== false }
   })
 
   // ── Mensajes de soporte (chat flotante Ayuda/Soporte de cada tenant) ──────

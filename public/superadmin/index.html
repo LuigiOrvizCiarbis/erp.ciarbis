@@ -278,6 +278,9 @@ tr:hover td{background:rgba(255,255,255,0.02)}
       <button class="tab" id="tab-import" onclick="showTab('import')">
         <span class="tab-icon">📥</span> Import / Export
       </button>
+      <button class="tab" id="tab-ia" onclick="showTab('ia')">
+        <span class="tab-icon">✨</span> BIMS IA
+      </button>
     </div>
     <div class="topbar-right">
       <span class="badge-live"><span class="dot-live"></span> Live</span>
@@ -482,6 +485,27 @@ tr:hover td{background:rgba(255,255,255,0.02)}
       </div>
     </div>
 
+    <!-- ── TAB: BIMS IA (consumo por empresa) ── -->
+    <div id="view-ia" style="display:none">
+      <div class="section-title">
+        <div>
+          <div class="stitle">BIMS IA — consumo por empresa</div>
+          <div class="smeta" id="iaMeta">Cargando...</div>
+        </div>
+        <div style="display:flex;gap:8px;align-items:center">
+          <input type="month" id="iaMes" onchange="loadIa()" style="padding:6px 8px;border-radius:8px;border:1px solid var(--border);background:var(--input-bg);color:var(--text)"/>
+          <button class="tbtn" onclick="loadIa()">↻</button>
+        </div>
+      </div>
+      <div class="twrap">
+        <table>
+          <thead><tr><th>Empresa</th><th>Consultas</th><th>Tokens entrada</th><th>Tokens caché (leídos)</th><th>Tokens salida</th><th>Costo U$D</th><th>BIMS IA</th></tr></thead>
+          <tbody id="iaBody"></tbody>
+        </table>
+      </div>
+      <p style="font-size:12px;color:var(--text2);margin-top:.75rem">El costo se calcula con los tokens exactos que devuelve cada respuesta de Claude y el precio de lista del modelo. Apagar una empresa oculta el chat de BIMS IA para todos sus usuarios.</p>
+    </div>
+
   </div><!-- /content -->
 </div><!-- /panel -->
 
@@ -601,10 +625,37 @@ function refreshAll() {
 //  TAB SWITCH
 // ════════════════════════════════════════════
 function showTab(name) {
-  ['dashboard','clientes','import'].forEach(t => {
+  if (name === 'ia') loadIa()
+  ['dashboard','clientes','import','ia'].forEach(t => {
     document.getElementById('view-' + t).style.display = t === name ? 'block' : 'none'
     document.getElementById('tab-' + t).classList.toggle('active', t === name)
   })
+}
+
+// ════════════════════════════════════════════
+//  BIMS IA — consumo por empresa (V2.109.0)
+// ════════════════════════════════════════════
+function iaEsc(s) { return String(s == null ? '' : s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])) }
+async function loadIa() {
+  const mesEl = document.getElementById('iaMes')
+  if (!mesEl.value) mesEl.value = new Date().toISOString().slice(0, 7)
+  const d = await fetch(`${API}/superadmin/ia/uso?mes=${mesEl.value}`, { headers: { 'x-sa-token': getToken() } }).then(r => r.json()).catch(() => null)
+  if (!d || !d.ok) { document.getElementById('iaMeta').textContent = 'No se pudo cargar.'; return }
+  document.getElementById('iaMeta').innerHTML = (d.configurada ? '' : '⚠️ <strong>Falta ANTHROPIC_API_KEY en el hosting</strong> — el chat no aparece en ninguna empresa. · ')
+    + 'Modelo: ' + iaEsc(d.modelo) + ' · Total del mes: <strong>' + fmt(d.total.consultas) + ' consultas · U$D ' + d.total.costoUSD.toFixed(2) + '</strong>'
+  const filas = d.filas.slice().sort((a, b) => (b.uso?.costoUSD || 0) - (a.uso?.costoUSD || 0))
+  document.getElementById('iaBody').innerHTML = filas.map(f => {
+    const u = f.uso || {}
+    return '<tr><td>' + iaEsc(f.nombre) + (f.activo ? '' : ' <span style="color:var(--text2)">(suspendida)</span>') + '</td>'
+      + '<td>' + fmt(u.consultas || 0) + '</td><td>' + fmt((u.entrada || 0) + (u.cacheEscrita || 0)) + '</td><td>' + fmt(u.cacheLeida || 0) + '</td><td>' + fmt(u.salida || 0) + '</td>'
+      + '<td><strong>' + (u.costoUSD || 0).toFixed(2) + '</strong></td>'
+      + '<td><label style="display:flex;gap:6px;align-items:center;cursor:pointer"><input type="checkbox" ' + (f.desactivada ? '' : 'checked') + ' data-t="' + iaEsc(f.tenantId) + '" onchange="toggleIa(this.dataset.t, this.checked)"/> ' + (f.desactivada ? 'Apagada' : 'Activa') + '</label></td></tr>'
+  }).join('') || '<tr><td colspan="7">Sin empresas.</td></tr>'
+}
+async function toggleIa(tenantId, activa) {
+  const r = await fetch(`${API}/superadmin/tenants/${tenantId}/ia`, { method: 'PATCH', headers: { 'x-sa-token': getToken(), 'Content-Type': 'application/json' }, body: JSON.stringify({ activa }) }).then(r => r.json()).catch(() => null)
+  showToast(r && r.ok ? ('BIMS IA ' + (activa ? 'activada' : 'apagada')) : 'No se pudo guardar', r && r.ok ? 'ok' : 'err')
+  loadIa()
 }
 
 // ════════════════════════════════════════════
