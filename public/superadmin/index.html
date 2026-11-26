@@ -625,11 +625,11 @@ function refreshAll() {
 //  TAB SWITCH
 // ════════════════════════════════════════════
 function showTab(name) {
-  if (name === 'ia') loadIa()
-  ['dashboard','clientes','import','ia'].forEach(t => {
+  ;['dashboard','clientes','import','ia'].forEach(t => {
     document.getElementById('view-' + t).style.display = t === name ? 'block' : 'none'
     document.getElementById('tab-' + t).classList.toggle('active', t === name)
   })
+  if (name === 'ia') loadIa()
 }
 
 // ════════════════════════════════════════════
