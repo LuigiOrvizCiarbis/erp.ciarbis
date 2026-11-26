@@ -121,6 +121,7 @@
     <a href="#auditoria">Auditoría</a>
     <a href="#clientes">Clientes</a>
     <a href="#fichajes">Fichajes</a>
+    <a href="#precios-excel">Actualizar precios desde Excel</a>
     <a href="#bims-ia">BIMS IA (asistente)</a>
     <a href="#recomendaciones">Recomendaciones de uso</a>
   </nav>
@@ -379,6 +380,17 @@
         <li>Habilitación para abrir y cerrar la caja.</li>
         <li>Consulta y exportación del historial de fichajes.</li>
       </ul>
+    </section>
+
+    <section id="precios-excel">
+      <h2>Actualizar precios desde Excel (listas de precio e IVA)</h2>
+      <p>En <strong>Inventario &gt; Actualizar precios</strong> (o en Ajustes &gt; Listas de precio) podés cargar los precios de una o varias listas de una sola vez, por ejemplo un Excel de Consumidor Final y otro de Farmacias. Solo se cambian precios: el stock, los costos y los datos de los productos no se tocan, y cada precio queda exactamente como viene en el Excel (con sus redondeos).</p>
+      <ol>
+        <li><strong>Subir y elegir lista:</strong> subí los archivos y elegí a qué lista va cada uno (o creá una lista nueva). Indicá si los precios <em>incluyen IVA</em> (precio final) o son <em>+IVA</em> (sin IVA). Confirmá qué columna es el SKU, cuál el nombre y cuál el precio.</li>
+        <li><strong>Revisar:</strong> vas a ver cada fila con el producto que encontró el sistema (por SKU o código de barras, y si no por nombre), el precio actual, el nuevo y la diferencia. Las filas marcadas "¿es este?" se encontraron por un nombre parecido: tildalas solo si es el producto correcto. Todavía no se guardó nada.</li>
+        <li><strong>Confirmar:</strong> se actualizan los precios tildados y queda registrado en Auditoría.</li>
+      </ol>
+      <p><strong>Listas +IVA:</strong> en una lista marcada "+IVA" (por ejemplo Farmacias) el precio se guarda sin IVA y en Inventario ves tres columnas: precio sin IVA, IVA % y precio con IVA, que se calcula solo. El IVA de cada producto se cambia en la misma celda, o tildando varios productos y tocando <strong>Cambiar IVA</strong>. El IVA para productos nuevos se define en Ajustes &gt; Listas de precio. Cuando en Caja se cobra con una lista +IVA (por ejemplo, al elegir un cliente que tiene asignada la lista Farmacias), el carrito muestra subtotal sin IVA + IVA = total, y el ticket sale con ese detalle.</p>
     </section>
 
     <section id="bims-ia">

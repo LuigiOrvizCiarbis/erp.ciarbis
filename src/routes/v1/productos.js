@@ -15,6 +15,7 @@ import {
 } from '../../lib/ubicacion.js'
 import { cotizacionDefault, conPreciosEnPesos, listaEnPesos, desdePesos, aPesos } from '../../lib/moneda.js'
 import { conPreciosListas, recalcularPrincipal, cargarConfigListas, invalidarListas } from '../../lib/listasPrecio.js'
+import { revisarImportPrecios, confirmarImportPrecios } from '../../lib/importarPrecios.js'
 
 // Include de las filas por sucursal que pide un listado: la de la sucursal en la que se mira el
 // stock y/o la de la que se quiere la ubicación (pueden ser la misma). null si no pide ninguna.
@@ -228,7 +229,7 @@ const campoVarianteOpcionSchema = z.object({
 
 const bulkSchema = z.object({
   ids: z.array(z.string()).min(1),
-  accion: z.enum(['categoria', 'margen', 'aumento', 'vencimiento', 'reactivar', 'precioManual']),
+  accion: z.enum(['categoria', 'margen', 'aumento', 'vencimiento', 'reactivar', 'precioManual', 'iva']),
   payload: z.record(z.any()).default({}),
 })
 
@@ -304,6 +305,30 @@ async function paraFront(tenantId, productos) {
 
 // ¿La lista principal ya calcula precios sola? Recién ahí un precio tipeado a mano marca al
 // producto como manual (antes de activarla, todo precio es "a mano" y no tiene sentido marcarlo).
+// IVA % por defecto de la empresa para productos nuevos (Ajustes > Listas de precio, kv
+// "iva.default"; V2.110.0). Sin configurar = 21.
+export async function ivaDefault(tenantId) {
+  const r = await prisma.configuracionEmpresa.findUnique({ where: { tenantId_clave: { tenantId, clave: 'iva.default' } } }).catch(() => null)
+  const n = r ? Number(r.valor) : NaN
+  return n >= 0 && n <= 100 ? n : 21
+}
+
+const importPreciosArchivo = z.object({
+  listaId: z.string().min(1),
+  masIva: z.boolean().default(false),
+})
+const revisarPreciosSchema = z.object({
+  archivos: z.array(importPreciosArchivo.extend({
+    mapeo: z.object({ sku: z.string().optional(), nombre: z.string().optional(), precio: z.string().min(1, 'Elegí la columna de precio.') }),
+    filas: z.array(z.record(z.any())).max(20000),
+  })).min(1).max(5),
+})
+const confirmarPreciosSchema = z.object({
+  archivos: z.array(importPreciosArchivo.extend({
+    items: z.array(z.object({ productoId: z.string(), varianteId: z.string().nullable().optional(), precio: z.number().min(0) })).max(20000),
+  })).min(1).max(5),
+})
+
 async function principalAutomatica(tenantId) {
   const cfg = await cargarConfigListas(tenantId)
   return !!(cfg.principal && cfg.principal.autoActiva)
@@ -666,6 +691,7 @@ export default async function productosRoutes(fastify) {
     }
     body.data.nombre = tituloCase(body.data.nombre)
     normalizarUmPorPeso(body.data)
+    if (req.body.impuesto === undefined) body.data.impuesto = await ivaDefault(req.tenantId)
 
     // activo:true en las 3 — un producto en Papelera "no existe realmente" para quien está
     // dando de alta uno nuevo (mismo criterio que el resto de la app desde el fix de Papelera
@@ -933,6 +959,15 @@ export default async function productosRoutes(fastify) {
         where: { id: { in: ids }, tenantId: req.tenantId },
         data: { categoriaId: payload.categoriaId || null },
       })
+      return { actualizados: r.count }
+    }
+
+    // V2.110.0: IVA % de varios productos de una (botón "Cambiar IVA" de Inventario).
+    if (accion === 'iva') {
+      const iva = Number(payload.iva)
+      if (!(iva >= 0 && iva <= 100)) return reply.status(400).send({ error: 'validation_error', message: 'El IVA tiene que ser un % entre 0 y 100.' })
+      const r = await prisma.producto.updateMany({ where: { id: { in: ids }, tenantId: req.tenantId }, data: { impuesto: iva } })
+      await registrarAuditoria({ tenantId: req.tenantId, userId: req.user.id, req, accion: 'producto.iva_masivo', entidad: 'Producto', entidadId: null, detalle: { iva, productos: r.count } })
       return { actualizados: r.count }
     }
 
@@ -1259,6 +1294,43 @@ export default async function productosRoutes(fastify) {
   // ── POST /productos/importar-excel/preview ────────────────
   // Sube un Excel/CSV, lo parsea y detecta automáticamente qué columna es cada campo.
   // No toca la base de datos — el cliente confirma después con /confirmar.
+  // ── Importar precios a listas (V2.110.0) ─────────────────
+  // Paso 2 (revisar): no toca nada, devuelve el match de cada fila. Paso 3 (confirmar): guarda
+  // SOLO precios — ver src/lib/importarPrecios.js. Las filas vienen del /importar-excel/preview.
+  fastify.post('/productos/importar-precios/revisar', {
+    preHandler: [fastify.verifyJWT, fastify.verifyTenant, fastify.requireRole(['ADMIN'])],
+  }, async (req, reply) => {
+    const body = revisarPreciosSchema.safeParse(req.body)
+    if (!body.success) return reply.status(400).send({ error: 'validation_error', message: body.error.issues[0].message })
+    const ids = body.data.archivos.map((a) => a.listaId)
+    if (new Set(ids).size !== ids.length) return reply.status(400).send({ error: 'validation_error', message: 'Dos archivos apuntan a la misma lista: elegí una lista distinta para cada uno.' })
+    try {
+      return { archivos: await revisarImportPrecios(req.tenantId, body.data.archivos) }
+    } catch (e) {
+      if (e.statusCode) return reply.status(e.statusCode).send({ error: 'validation_error', message: e.message })
+      throw e
+    }
+  })
+
+  fastify.post('/productos/importar-precios/confirmar', {
+    preHandler: [fastify.verifyJWT, fastify.verifyTenant, fastify.requireRole(['ADMIN'])],
+  }, async (req, reply) => {
+    const body = confirmarPreciosSchema.safeParse(req.body)
+    if (!body.success) return reply.status(400).send({ error: 'validation_error', message: body.error.issues[0].message })
+    let r
+    try {
+      r = await confirmarImportPrecios(req.tenantId, body.data.archivos)
+    } catch (e) {
+      if (e.statusCode) return reply.status(e.statusCode).send({ error: 'validation_error', message: e.message })
+      throw e
+    }
+    await registrarAuditoria({
+      tenantId: req.tenantId, userId: req.user.id, req,
+      accion: 'lista_precio.importar_excel', entidad: 'ListaPrecio', entidadId: null, detalle: { listas: r },
+    })
+    return { listas: r }
+  })
+
   fastify.post('/productos/importar-excel/preview', {
     preHandler: [fastify.verifyJWT, fastify.verifyTenant, fastify.requireRole(['ADMIN', 'DEPOSITO'])],
   }, async (req, reply) => {
@@ -1341,6 +1413,7 @@ export default async function productosRoutes(fastify) {
     }
 
     const autoPrincipal = await principalAutomatica(req.tenantId)
+    const ivaNuevos = await ivaDefault(req.tenantId)
     const tocados = []
     for (let i = 0; i < filas.length; i++) {
       const fila = filas[i]
@@ -1429,6 +1502,7 @@ export default async function productosRoutes(fastify) {
                 precioCosto: convertirMoneda(precioCosto, monedas.costo, moneda, cot),
                 precioVenta: convertirMoneda(precioVenta, monedas.precio, moneda, cot),
                 ...(mapeo.precioVenta && precioVenta > 0 && autoPrincipal && { precioManual: true }),
+                impuesto: ivaNuevos,
                 ...(categoriaId && { categoriaId }),
               },
             })

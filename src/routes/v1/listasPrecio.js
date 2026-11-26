@@ -16,6 +16,7 @@ const listaSchema = z.object({
   nombre: z.string().min(1),
   base: z.enum(['PRINCIPAL', 'COSTO']).optional(),
   redondeo: z.number().min(0).optional(),
+  masIva: z.boolean().optional(), // V2.110.0: precios sin IVA (se suma el IVA del producto al cobrar)
 })
 
 const TIPOS = ['PCT', 'MONTO', 'MANUAL']
@@ -106,6 +107,7 @@ export default async function listasPrecioRoutes(fastify) {
         tenantId: req.tenantId, nombre,
         ...(body.data.base && { base: body.data.base }),
         ...(body.data.redondeo !== undefined && { redondeo: body.data.redondeo }),
+        ...(body.data.masIva !== undefined && { masIva: body.data.masIva }),
       },
     })
     invalidarListas(req.tenantId)
@@ -113,7 +115,12 @@ export default async function listasPrecioRoutes(fastify) {
   })
 
   fastify.put('/listas-precio/:id', adminOnly, async (req, reply) => {
-    let { nombre, activa, base, redondeo } = req.body || {}
+    let { nombre, activa, base, redondeo, masIva } = req.body || {}
+    if (masIva !== undefined) {
+      if (typeof masIva !== 'boolean') return reply.status(400).send({ error: 'validation_error', message: 'masIva inválido.' })
+      const l = await prisma.listaPrecio.findFirst({ where: { id: req.params.id, tenantId: req.tenantId }, select: { esDefault: true } })
+      if (l && l.esDefault && masIva) return reply.status(400).send({ error: 'validation_error', message: 'La lista principal siempre es con IVA incluido (precio final).' })
+    }
     if (nombre !== undefined) {
       nombre = tituloCase(nombre)
       const existe = await prisma.listaPrecio.findFirst({ where: { tenantId: req.tenantId, nombre: { equals: nombre, mode: 'insensitive' }, id: { not: req.params.id } } })
@@ -128,6 +135,7 @@ export default async function listasPrecioRoutes(fastify) {
         ...(activa !== undefined && { activa }),
         ...(base !== undefined && { base }),
         ...(redondeo !== undefined && { redondeo: Number(redondeo) }),
+        ...(masIva !== undefined && { masIva }),
       },
     })
     if (r.count === 0) return reply.status(404).send({ error: 'not_found', message: 'Lista de precios no encontrada.' })

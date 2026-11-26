@@ -904,11 +904,11 @@ body.ia-on #soporte-chat-panel{bottom:144px}
       <div class="sidebar-version">
         <div class="sidebar-version-full">
           <div style="opacity:.75">Powered by BIMS ERP</div>
-          <div>V2.109.1</div>
+          <div>V2.110.0</div>
         </div>
         <div class="sidebar-version-mini">
           <div>CIARBIS©</div>
-          <div>V2.109.1</div>
+          <div>V2.110.0</div>
         </div>
       </div>
     </div>
@@ -2898,6 +2898,7 @@ MODULES.inventario = async function(){
       '<button class="btn btn-ghost" onclick="inv_variantes_modal_elegir()">'+ICON_SLIDERS+' Variantes</button>'
       +'<button class="btn btn-ghost" onclick="inv_recepcion()">'+ICON_SCAN+' Recepción por código</button>'
       +'<button class="btn btn-ghost" onclick="modal_importar_excel()">'+ICON_FILE_UP+' Importar Excel</button>'
+      +(currentUser.rol==='admin'?'<button class="btn btn-ghost" onclick="impp_abrir()" title="Actualizar solo precios de una o varias listas desde Excel (no toca stock)">'+ICON_FILE_UP+' Actualizar precios</button>':'')
       +'<button class="btn btn-ghost" onclick="modal_merma()">'+ICON_TRENDING_DOWN+' Registrar merma</button>'
       +'<button class="btn btn-ghost" onclick="modal_imprimir_stock()">'+ICON_PRINTER+' Imprimir stock</button>'
       +(currentUser.rol==='admin'?'<button class="btn btn-ghost" onclick="modal_stock_masivo()">'+ICON_WRENCH+' Modificar stock</button>':'')
@@ -3023,11 +3024,40 @@ var INV_PRODUCTOS_COLUMNAS=[
 function inv_listas_columnas(listas){
   window._invListas=listas||[];
   var sec=window._invListas.filter(function(l){return !l.esDefault;});
-  var antes=INV_PRODUCTOS_COLUMNAS.filter(function(c){return c.key.indexOf('lista_')===0;}).map(function(c){return c.key;}).join(',');
-  for(var i=INV_PRODUCTOS_COLUMNAS.length-1;i>=0;i--) if(INV_PRODUCTOS_COLUMNAS[i].key.indexOf('lista_')===0) INV_PRODUCTOS_COLUMNAS.splice(i,1);
+  // V2.110.0: lista "+IVA" (ej. Farmacias) → columnas "s/IVA" (lo guardado) y "c/IVA" (calculado
+  // con el IVA % de cada producto), más una columna "IVA %" editable en la celda.
+  var esDinamica=function(k){ return k.indexOf('lista_')===0||k.indexOf('listaiva_')===0||k==='ivapct'; };
+  var antes=INV_PRODUCTOS_COLUMNAS.filter(function(c){return esDinamica(c.key);}).map(function(c){return c.key;}).join(',');
+  for(var i=INV_PRODUCTOS_COLUMNAS.length-1;i>=0;i--) if(esDinamica(INV_PRODUCTOS_COLUMNAS[i].key)) INV_PRODUCTOS_COLUMNAS.splice(i,1);
   var idx=INV_PRODUCTOS_COLUMNAS.findIndex(function(c){return c.key==='precio';})+1;
-  sec.forEach(function(l,k){ INV_PRODUCTOS_COLUMNAS.splice(idx+k,0,{key:'lista_'+l.id, label:'🏷️ '+l.nombre, default:true}); });
-  if(sec.map(function(l){return 'lista_'+l.id;}).join(',')!==antes) window._invCols=null; // se re-arma el estado de columnas
+  var nuevas=[];
+  sec.forEach(function(l){
+    nuevas.push({key:'lista_'+l.id, label:'🏷️ '+l.nombre+(l.masIva?' s/IVA':''), default:true});
+    if(l.masIva) nuevas.push({key:'listaiva_'+l.id, label:'🏷️ '+l.nombre+' c/IVA', default:true});
+  });
+  if(sec.some(function(l){return l.masIva;})) nuevas.push({key:'ivapct', label:'IVA %', default:true});
+  nuevas.forEach(function(c,k){ INV_PRODUCTOS_COLUMNAS.splice(idx+k,0,c); });
+  if(nuevas.map(function(c){return c.key;}).join(',')!==antes) window._invCols=null; // se re-arma el estado de columnas
+}
+// IVA % de un producto (o de la variante, que hereda el de su producto).
+function inv_iva_pct(x){ var n=Number(x&&x.impuesto!=null?x.impuesto:(x&&x._ivaPadre!=null?x._ivaPadre:21)); return isNaN(n)?21:n; }
+function inv_precio_lista_iva(x, key){
+  var base=inv_precio_lista(x, 'lista_'+key.slice(9));
+  return base==null?null:Math.round(base*(1+inv_iva_pct(x)/100)*100)/100;
+}
+function inv_iva_celda_html(p){
+  var v=inv_iva_pct(p);
+  if(currentUser.rol!=='admin') return '<td>'+lp_num(v)+'%</td>';
+  return '<td onclick="event.stopPropagation()"><input type="number" min="0" max="100" step="0.5" value="'+v+'" title="IVA % de este producto" style="width:64px;padding:4px 6px;font-size:12px;background:var(--input-bg);color:var(--text);border:1px solid var(--border);border-radius:6px" onchange="inv_iva_set(\''+p.id+'\',this)"/></td>';
+}
+async function inv_iva_set(id, el){
+  var n=Number(el.value);
+  if(el.value===''||!(n>=0&&n<=100)){ showToast('El IVA tiene que ser un % entre 0 y 100','danger'); return; }
+  var r=await apiPatch('/api/v1/productos/bulk',{ids:[id], accion:'iva', payload:{iva:n}});
+  if(r.error){ showToast(r.message||'Error','danger'); return; }
+  clearCache('productos');
+  showToast('IVA actualizado a '+lp_num(n)+'% ✅','ok');
+  MODULES.inventario();
 }
 function inv_precio_lista(p, key){
   var v=p.preciosListas&&p.preciosListas[key.slice(6)];
@@ -3133,6 +3163,8 @@ function inv_col_getter(p,key){
     case 'actuEn': return p.actuEn||p.creadoEn||'';
     default:
       if(key.indexOf('lista_')===0){ var lv=inv_precio_lista(p,key); return lv==null?-Infinity:lv; }
+      if(key.indexOf('listaiva_')===0){ var li=inv_precio_lista_iva(p,key); return li==null?-Infinity:li; }
+      if(key==='ivapct') return inv_iva_pct(p);
       if(key.indexOf('ubic_')===0) return ubic_orden_clave((p.ubicacion||{})[key.slice(5)]);
       return '';
   }
@@ -3197,6 +3229,8 @@ function inv_tabla_html(prods){
         case 'actuEn': return '<td style="font-size:12px">'+fmtDateTime(p.actuEn||p.creadoEn)+'</td>';
         default:
           if(c.key.indexOf('lista_')===0){ var lp=inv_precio_lista(p,c.key); return '<td>'+(lp==null?'—':fmtPeso(lp))+(p.ventaPorPeso&&lp!=null?'<span style="color:var(--text2)">/kg</span>':'')+'</td>'; }
+          if(c.key.indexOf('listaiva_')===0){ var lpi=inv_precio_lista_iva(p,c.key); return '<td style="font-weight:600">'+(lpi==null?'—':fmtPeso(lpi))+'</td>'; }
+          if(c.key==='ivapct') return inv_iva_celda_html(p);
           if(c.key.indexOf('ubic_')===0){ var uv=(p.ubicacion||{})[c.key.slice(5)]; return uv?'<td class="mono" style="font-weight:600">'+imp_esc(uv)+'</td>':'<td style="color:var(--text3)">—</td>'; }
           return '<td>—</td>';
       }
@@ -3213,7 +3247,7 @@ function inv_tabla_html(prods){
     var filaPrincipal = '<tr'+(expandible?' style="cursor:pointer" onclick="inv_fila_toggle(\''+p.id+'\')" title="Click para ver cómo se reparte el stock entre variantes"':'')+'>'
       +'<td style="position:sticky;left:0;z-index:1;background:var(--surface);width:40px;min-width:40px;max-width:40px" onclick="event.stopPropagation()">'+checkbox+'</td>'+celdas
       +'<td style="'+TCOL_ACCIONES_STICKY_STYLE+'" onclick="event.stopPropagation()">'+acciones+'</td></tr>';
-    var filaExpandida = expandido ? p.variantes.map(function(v){ v._codigoPadre=p.codigoBarras; return inv_variante_fila_html(v, state, visibles); }).join('') : '';
+    var filaExpandida = expandido ? p.variantes.map(function(v){ v._codigoPadre=p.codigoBarras; v._ivaPadre=p.impuesto; return inv_variante_fila_html(v, state, visibles); }).join('') : '';
     return filaPrincipal+filaExpandida;
   }).join(''):emptyRow(visibles.length+2, enPapelera?'La papelera está vacía.':'No hay productos. Agregá el primero.');
   return '<div class="table-wrap inv-tabla-alta"><table><thead><tr>'+thead+'</tr></thead><tbody>'+body+'</tbody></table></div>';
@@ -3258,6 +3292,8 @@ function inv_variante_fila_html(v, state, visibles){
       case 'estado': return '<td>'+(v.activo?'<span class="badge b-ok">Activa</span>':'<span class="badge b-gray">Pausada</span>')+'</td>';
       default:
         if(c.key.indexOf('lista_')===0){ var vl=inv_precio_lista(v,c.key); return '<td style="font-size:12px">'+(vl==null?'—':fmtPeso(vl))+'</td>'; }
+        if(c.key.indexOf('listaiva_')===0){ var vli=inv_precio_lista_iva(v,c.key); return '<td style="font-size:12px">'+(vli==null?'—':fmtPeso(vli))+'</td>'; }
+        if(c.key==='ivapct') return '<td style="font-size:12px;color:var(--text2)">'+lp_num(inv_iva_pct(v))+'%</td>';
         // Ubicación: la propia de la variante en negro; la heredada del producto, en gris.
         if(c.key.indexOf('ubic_')===0){
           var nk=c.key.slice(5), propia=(v.ubicacion||{})[nk], efect=(v.ubicacionEfectiva||{})[nk];
@@ -3443,6 +3479,7 @@ function inv_sel_actualizar_barra(){
     +'<button class="btn btn-ghost btn-sm" onclick="inv_bulk_precio(\'margen\')">Aplicar margen %</button>'
     +'<button class="btn btn-ghost btn-sm" onclick="inv_bulk_precio(\'aumento\')">Aplicar aumento %</button>'
     +'<button class="btn btn-ghost btn-sm" onclick="inv_bulk_lista_regla()">🏷️ Regla de lista de precios</button>'
+    +'<button class="btn btn-ghost btn-sm" onclick="inv_bulk_iva()" title="Cambia el IVA % de los productos tildados">🧾 Cambiar IVA</button>'
     +'<button class="btn btn-ghost btn-sm" onclick="inv_bulk_ejecutar(\'precioManual\',{manual:true})" title="La lista principal no les va a recalcular el precio">✋ Precio manual</button>'
     +'<button class="btn btn-ghost btn-sm" onclick="inv_bulk_ejecutar(\'precioManual\',{manual:false})" title="Vuelven a tomar el precio de la lista principal">🔄 Precio automático</button>'
     +'<button class="btn btn-ghost btn-sm" onclick="inv_bulk_vencimiento()">Definir vencimiento</button>'
@@ -3491,6 +3528,20 @@ async function inv_bulk_lista_regla_guardar(){
   if(r.error){ showToast(r.message||'Error','danger'); return; }
   showToast((r.creadas||0)+' regla(s) guardada(s) ✅','ok');
   closeModal(); clearCache('productos'); MODULES.inventario();
+}
+// V2.110.0: IVA % de varios productos de una (los precios c/IVA de las listas "+IVA" se recalculan solos).
+function inv_bulk_iva(){
+  var ids=Object.keys(window._inv_sel); if(!ids.length) return;
+  openModal('<h3 class="modal-title">Cambiar IVA — '+ids.length+' producto(s)</h3>'
+    +'<div class="form-grid"><div class="form-group full"><label>IVA %</label><select id="bulk-iva-sel" onchange="document.getElementById(\'bulk-iva\').value=this.value"><option value="21">21% (general)</option><option value="10.5">10,5% (reducido)</option><option value="27">27%</option><option value="0">0% (exento)</option></select>'
+    +'<input id="bulk-iva" type="number" min="0" max="100" step="0.5" value="21" style="margin-top:8px" placeholder="Otro %"/></div>'
+    +'<div class="form-group full" style="font-size:12px;color:var(--text2)">Solo cambia el IVA: el precio guardado de cada lista queda igual. En las listas "+IVA" (ej. Farmacias) el precio con IVA y lo que se cobra en Caja se recalculan solos.</div></div>'
+    +'<div class="modal-footer"><button class="btn btn-primary" onclick="inv_bulk_iva_aplicar()">Aplicar</button><button class="btn btn-ghost" onclick="closeModal()">Cancelar</button></div>');
+}
+function inv_bulk_iva_aplicar(){
+  var v=document.getElementById('bulk-iva').value, n=Number(v);
+  if(v===''||!(n>=0&&n<=100)){ showToast('El IVA tiene que ser un % entre 0 y 100','danger'); return; }
+  inv_bulk_ejecutar('iva',{iva:n});
 }
 async function inv_bulk_ejecutar(accion, payload){
   var ids=Object.keys(window._inv_sel);
@@ -4692,6 +4743,207 @@ async function prod_sku_error_mostrar(r, skuIntentado, inputId){
   }
 }
 
+/* ── Actualizar precios desde Excel a una o varias listas (V2.110.0) ──
+   3 pasos: (1) subir 1+ Excel y decir a qué lista va cada uno y si viene con IVA incluido o "+IVA"
+   → (2) revisar qué producto matcheó cada fila, precio actual → nuevo y avisos (nada se guarda)
+   → (3) confirmar. SOLO toca precios (nunca stock, costo ni datos del producto) y respeta el
+   precio tal cual viene en el Excel (sin redondeo de lista). Backend: src/lib/importarPrecios.js.
+   Las filas se leen con el mismo /importar-excel/preview del importador de productos. ── */
+function impp_norm(s){ return String(s==null?'':s).normalize('NFD').replace(/[̀-ͯ]/g,'').toLowerCase().replace(/[^a-z0-9]+/g,' ').trim(); }
+async function impp_abrir(){
+  var listas=await apiList('/api/v1/listas-precio').catch(function(){return [];});
+  window._impp={listas:listas, archivos:[], revision:null, soloAvisos:false};
+  impp_paso1();
+}
+function impp_pasos_html(n){
+  var ps=['Subir y elegir lista','Revisar','Listo'];
+  return '<div style="display:flex;gap:6px;margin-bottom:16px;flex-wrap:wrap">'+ps.map(function(t,i){
+    var act=i+1===n, hecho=i+1<n;
+    return '<div style="flex:1;min-width:110px;padding:6px 10px;border-radius:8px;font-size:12px;font-weight:600;'
+      +(act?'background:var(--accent);color:#fff':hecho?'background:var(--surface2);color:var(--text)':'background:var(--surface2);color:var(--text3)')+'">'
+      +(hecho?'✓ ':(i+1)+'. ')+t+'</div>';
+  }).join('')+'</div>';
+}
+function impp_lista_options(a){
+  var L=window._impp.listas;
+  return L.map(function(l){ return '<option value="'+l.id+'"'+(a.listaId===l.id?' selected':'')+'>'+(l.esDefault?'⭐ ':'🏷️ ')+lp_esc(l.nombre)+(l.esDefault?' (principal)':'')+(l.masIva?' · +IVA':'')+'</option>'; }).join('')
+    +'<option value="__nueva"'+(a.listaId==='__nueva'?' selected':'')+'>＋ Crear lista nueva…</option>';
+}
+function impp_paso1(){
+  var st=window._impp;
+  var cards=st.archivos.map(function(a,i){
+    var lista=st.listas.find(function(l){return l.id===a.listaId;});
+    var esPrincipal=!!(lista&&lista.esDefault);
+    var colOpts=function(sel, vacio){ return (vacio?'<option value="">— '+vacio+' —</option>':'')+a.columnas.map(function(c){return '<option value="'+lp_esc(c)+'"'+(c===sel?' selected':'')+'>'+lp_esc(c)+'</option>';}).join(''); };
+    var ej=a.filas[0]||{};
+    return '<div style="border:1px solid var(--border);border-radius:12px;padding:14px;margin-bottom:12px">'
+      +'<div style="display:flex;justify-content:space-between;gap:8px;align-items:center;margin-bottom:10px"><div style="font-weight:700">📄 '+lp_esc(a.nombreArchivo)+' <span style="font-weight:400;color:var(--text2);font-size:12px">· '+a.filas.length+' fila(s)</span></div>'
+      +'<button class="btn-icon" title="Quitar este archivo" onclick="impp_quitar('+i+')">✕</button></div>'
+      +'<div class="form-grid">'
+      +'<div class="form-group"><label>¿A qué lista de precios va?</label><select onchange="impp_set('+i+',\'listaId\',this.value)">'+impp_lista_options(a)+'</select>'
+      +(a.listaId==='__nueva'?'<input style="margin-top:6px" placeholder="Nombre de la lista nueva (ej: Farmacias)" value="'+lp_esc(a.nuevaNombre||'')+'" oninput="window._impp.archivos['+i+'].nuevaNombre=this.value"/>':'')+'</div>'
+      +'<div class="form-group"><label>Los precios del Excel…</label>'
+      +(esPrincipal
+        ?'<div style="font-size:12px;color:var(--text2);padding:8px 0">…son el <strong>precio final con IVA</strong> (la lista principal siempre es precio final).</div>'
+        :'<select onchange="impp_set('+i+',\'masIva\',this.value===\'1\')"><option value="0"'+(a.masIva?'':' selected')+'>incluyen IVA (precio final)</option><option value="1"'+(a.masIva?' selected':'')+'>son SIN IVA (+IVA)</option></select>')
+      +'</div>'
+      +'<div class="form-group"><label>Columna SKU / código</label><select onchange="impp_set('+i+',\'sku\',this.value)">'+colOpts(a.mapeo.sku,'sin SKU')+'</select></div>'
+      +'<div class="form-group"><label>Columna nombre</label><select onchange="impp_set('+i+',\'nombre\',this.value)">'+colOpts(a.mapeo.nombre,'sin nombre')+'</select></div>'
+      +'<div class="form-group full"><label>Columna de precio *</label><select onchange="impp_set('+i+',\'precio\',this.value)">'+colOpts(a.mapeo.precio,'elegí')+'</select>'
+      +'<div style="font-size:11px;color:var(--text2);margin-top:4px">Ej. 1ª fila: '+lp_esc(a.mapeo.sku?ej[a.mapeo.sku]:'')+' · '+lp_esc(a.mapeo.nombre?ej[a.mapeo.nombre]:'')+' · <strong>'+lp_esc(a.mapeo.precio?ej[a.mapeo.precio]:'')+'</strong></div></div>'
+      +'</div></div>';
+  }).join('');
+  openModalWide('<h3 class="modal-title">Actualizar precios desde Excel</h3>'
+    +impp_pasos_html(1)
+    +'<p style="color:var(--text2);font-size:13px;margin-bottom:14px">Subí uno o varios Excel (ej. uno por lista: Consumidor Final y Farmacias) y elegí a qué lista va cada uno. <strong>Solo se actualizan precios</strong>: el stock, el costo y los datos de los productos no se tocan, y el precio queda exactamente como viene en el Excel.</p>'
+    +cards
+    +'<div id="impp-drop" style="border:2px dashed var(--border);border-radius:12px;padding:'+(st.archivos.length?'14':'28')+'px;text-align:center;cursor:pointer" onclick="document.getElementById(\'impp-file\').click()">'
+    +'<div style="font-weight:600">'+(st.archivos.length?'＋ Agregar otro Excel':'📄 Hacé click para elegir el Excel')+'</div>'
+    +'<div style="font-size:12px;color:var(--text2)">.xlsx, .xls o .csv · podés elegir varios a la vez</div>'
+    +'<input type="file" id="impp-file" accept=".xlsx,.xls,.csv" multiple style="display:none" onchange="impp_subir(this.files)"/></div>'
+    +'<div class="modal-footer"><button class="btn btn-primary" onclick="impp_revisar()"'+(st.archivos.length?'':' disabled')+'>Revisar →</button><button class="btn btn-ghost" onclick="closeModal()">Cancelar</button></div>');
+}
+// Lista sugerida por el nombre del archivo ("..._farmacias.xlsx" → lista "Farmacias";
+// "cons-final" / "consumidor" / "publico" → la principal).
+function impp_sugerir_lista(nombreArchivo){
+  var n=impp_norm(nombreArchivo.replace(/\.[a-z]+$/i,''));
+  var L=window._impp.listas, usadas=window._impp.archivos.map(function(a){return a.listaId;});
+  var sec=L.filter(function(l){ return !l.esDefault && usadas.indexOf(l.id)<0 && impp_norm(l.nombre) && n.indexOf(impp_norm(l.nombre))>-1; });
+  if(sec.length) return sec[0];
+  var pr=L.find(function(l){return l.esDefault;});
+  if(pr && usadas.indexOf(pr.id)<0 && /(cons|final|publico|minorista)/.test(n)) return pr;
+  return null;
+}
+async function impp_subir(files){
+  files=Array.prototype.slice.call(files||[]);
+  if(!files.length) return;
+  var drop=document.getElementById('impp-drop');
+  if(drop) drop.innerHTML='<div class="loading-state" style="padding:0"><div class="loading-icon">'+ICON_SPIN+'</div>Leyendo '+files.length+' archivo(s)...</div>';
+  for(var k=0;k<files.length;k++){
+    var f=files[k];
+    var r=await apiUpload('/api/v1/productos/importar-excel/preview', f).catch(function(){return {};});
+    if(!r.columnas){ showToast(f.name+': '+(r.message||'no se pudo leer'),'danger'); continue; }
+    var md=r.mapeoDetectado||{};
+    var precioCol=md.precioVenta||r.columnas.find(function(c){return /precio|pvp|importe|valor/i.test(c);})||md.precioCosto||'';
+    var a={nombreArchivo:f.name, columnas:r.columnas, filas:r.filas, mapeo:{sku:md.sku||md.codigoBarras||'', nombre:md.nombre||'', precio:precioCol}, listaId:'', masIva:false};
+    var sug=impp_sugerir_lista(f.name);
+    if(sug){ a.listaId=sug.id; a.masIva=!sug.esDefault && (!!sug.masIva || /iva|farmac|mayor/.test(impp_norm(f.name))); }
+    else {
+      var nombreSug=(f.name.replace(/\.[a-z]+$/i,'').split(/[_\-\s]+/).filter(function(x){return /[a-z]/i.test(x)&&x.length>2;}).pop()||'');
+      a.listaId='__nueva'; a.nuevaNombre=nombreSug?nombreSug.charAt(0).toUpperCase()+nombreSug.slice(1).toLowerCase():'';
+      a.masIva=/iva|farmac|mayor/.test(impp_norm(f.name));
+    }
+    window._impp.archivos.push(a);
+  }
+  impp_paso1();
+}
+function impp_quitar(i){ window._impp.archivos.splice(i,1); impp_paso1(); }
+function impp_set(i, campo, valor){
+  var a=window._impp.archivos[i];
+  if(campo==='listaId'){
+    a.listaId=valor;
+    var l=window._impp.listas.find(function(x){return x.id===valor;});
+    if(l&&l.esDefault) a.masIva=false; else if(l) a.masIva=!!l.masIva||a.masIva;
+    impp_paso1(); return;
+  }
+  if(campo==='masIva'){ a.masIva=valor; return; }
+  a.mapeo[campo]=valor;
+  impp_paso1();
+}
+async function impp_revisar(){
+  var st=window._impp;
+  for(var i=0;i<st.archivos.length;i++){
+    var a=st.archivos[i];
+    if(!a.listaId){ showToast(a.nombreArchivo+': elegí a qué lista va','danger'); return; }
+    if(a.listaId==='__nueva' && !(a.nuevaNombre||'').trim()){ showToast(a.nombreArchivo+': poné el nombre de la lista nueva','danger'); return; }
+    if(!a.mapeo.precio){ showToast(a.nombreArchivo+': elegí la columna de precio','danger'); return; }
+    if(!a.mapeo.sku && !a.mapeo.nombre){ showToast(a.nombreArchivo+': elegí la columna de SKU o la de nombre (para saber qué producto es)','danger'); return; }
+  }
+  var ids=st.archivos.filter(function(a){return a.listaId!=='__nueva';}).map(function(a){return a.listaId;});
+  if(new Set(ids).size!==ids.length){ showToast('Dos archivos van a la misma lista: elegí una distinta para cada uno','danger'); return; }
+  document.getElementById('modal-content').innerHTML='<div class="loading-state"><div class="loading-icon">'+ICON_SPIN+'</div>Buscando los productos...</div>';
+  // Listas nuevas: se crean recién acá (con su marca +IVA), así cancelar en el paso 1 no deja nada.
+  for(var j=0;j<st.archivos.length;j++){
+    var x=st.archivos[j];
+    if(x.listaId!=='__nueva') continue;
+    var nl=await apiPost('/api/v1/listas-precio',{nombre:x.nuevaNombre.trim(), base:'PRINCIPAL', masIva:!!x.masIva});
+    if(!nl.id){ showToast(nl.message||'No se pudo crear la lista','danger'); impp_paso1(); return; }
+    st.listas.push(nl); x.listaId=nl.id;
+  }
+  var r=await apiPost('/api/v1/productos/importar-precios/revisar',{archivos:st.archivos.map(function(a){
+    return {listaId:a.listaId, masIva:!!a.masIva, mapeo:{sku:a.mapeo.sku||undefined, nombre:a.mapeo.nombre||undefined, precio:a.mapeo.precio}, filas:a.filas};
+  })});
+  if(!r.archivos){ showToast(r.message||'Error al revisar','danger'); impp_paso1(); return; }
+  st.revision=r.archivos;
+  impp_paso2();
+}
+function impp_dif_html(actual, nuevo){
+  if(nuevo==null||!(actual>0)) return '—';
+  var d=(nuevo/actual-1)*100;
+  if(Math.abs(d)<0.005) return '<span style="color:var(--text3)">=</span>';
+  return '<span style="color:'+(d>0?'var(--green-text)':'var(--red-text)')+'">'+(d>0?'+':'')+d.toFixed(1)+'%</span>';
+}
+function impp_paso2(){
+  var st=window._impp;
+  var total=0;
+  var secciones=st.revision.map(function(a, ai){
+    var sel=a.items.filter(function(it){return it.incluir;}).length; total+=sel;
+    var R=a.resumen;
+    var chips=[['Filas',R.total,''],['Encontrados',R.matchean,'b-ok'],['Cambian',R.cambian,'b-info'],['Iguales',R.iguales,'b-gray'],['A confirmar',R.aConfirmar,'b-warn'],['No encontrados',R.sinMatch,'b-danger']]
+      .filter(function(c){return c[1]>0||c[0]==='Filas';}).map(function(c){return '<span class="badge '+(c[2]||'b-gray')+'" style="margin-right:4px">'+c[0]+': '+c[1]+'</span>';}).join('');
+    var filas=a.items.filter(function(it){return !st.soloAvisos||it.avisos.length;}).map(function(it){
+      var idx=a.items.indexOf(it);
+      var conIva=a.masIva&&it.precio!=null&&it.productoId?Math.round(it.precio*(1+(it.impuesto!=null?it.impuesto:21)/100)*100)/100:null;
+      var matchTxt=it.match==='parecido'?'<span class="badge b-warn">¿es este?</span> ':'';
+      return '<tr style="'+(it.productoId?'':'opacity:.65')+'">'
+        +'<td>'+(it.productoId&&it.precio!=null?'<input type="checkbox" style="width:auto" '+(it.incluir?'checked ':'')+'onchange="impp_toggle('+ai+','+idx+',this.checked)"/>':'')+'</td>'
+        +'<td style="color:var(--text2);font-size:11px">'+it.fila+'</td>'
+        +'<td style="font-size:12px;white-space:normal;min-width:140px"><div class="mono" style="color:var(--text2)">'+lp_esc(it.skuExcel||'')+'</div>'+lp_esc(it.nombreExcel||'')+'</td>'
+        +'<td style="font-size:12px;white-space:normal;min-width:140px">'+(it.productoId?matchTxt+lp_esc(it.nombreSistema)+'<div class="mono" style="color:var(--text2)">'+lp_esc(it.skuSistema||'')+'</div>':'<span style="color:var(--red-text)">—</span>')+'</td>'
+        +'<td style="font-size:12px">'+(it.productoId?fmtPeso(it.actual):'—')+'</td>'
+        +'<td style="font-weight:700">'+(it.precio!=null?fmtPeso(it.precio):'<span style="color:var(--red-text)">?</span>')+'</td>'
+        +(a.masIva?'<td style="font-size:12px">'+(conIva!=null?fmtPeso(conIva)+' <span style="color:var(--text3)">('+lp_num(it.impuesto)+'%)</span>':'—')+'</td>':'')
+        +'<td style="font-size:12px">'+(it.productoId?impp_dif_html(it.actual,it.precio):'')+'</td>'
+        +'<td style="font-size:11px;color:var(--amber-text);white-space:normal;min-width:150px">'+it.avisos.map(lp_esc).join('<br>')+'</td></tr>';
+    }).join('');
+    var cab=['','Fila','En el Excel','En el sistema','Actual','Nuevo'+(a.masIva?' s/IVA':'')].concat(a.masIva?['Nuevo c/IVA']:[]).concat(['Dif.','Avisos']);
+    return '<div style="border:1px solid var(--border);border-radius:12px;padding:14px;margin-bottom:14px">'
+      +'<div style="display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:8px">'
+      +'<div style="font-weight:700;font-size:15px">'+(a.esPrincipal?'⭐ ':'🏷️ ')+lp_esc(a.listaNombre)+' '+(a.masIva?'<span class="badge b-info">+IVA</span>':'<span class="badge b-gray">IVA incluido</span>')+'</div>'
+      +'<div style="font-size:12px"><a href="#" onclick="event.preventDefault();impp_todos('+ai+',true)">Tildar todos</a> · <a href="#" onclick="event.preventDefault();impp_todos('+ai+',false)">Ninguno</a></div></div>'
+      +'<div style="margin-bottom:8px">'+chips+'</div>'
+      +(a.masIva&&!a.masIvaActual?'<div style="font-size:12px;color:var(--text2);margin-bottom:8px">Al confirmar, la lista "'+lp_esc(a.listaNombre)+'" queda marcada como <strong>+IVA</strong>: en Caja se cobra el precio + el IVA de cada producto.</div>':'')
+      +(!a.masIva&&a.masIvaActual?'<div style="font-size:12px;color:var(--amber-text);margin-bottom:8px">⚠️ Esta lista hoy es +IVA y la estás cargando como precio final: al confirmar deja de sumar IVA.</div>':'')
+      +'<div style="overflow-x:auto;max-height:340px;overflow-y:auto">'+tableWrap(cab, filas||emptyRow(cab.length,'Sin filas para mostrar.'))+'</div></div>';
+  }).join('');
+  openModalWide('<h3 class="modal-title">Revisá antes de guardar</h3>'
+    +impp_pasos_html(2)
+    +'<div style="display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:12px"><div style="font-size:13px;color:var(--text2)">Todavía no se guardó nada. Lo tildado se actualiza; lo marcado "¿es este?" se encontró por un nombre parecido: tildalo solo si es el producto correcto.</div>'
+    +'<label style="display:flex;align-items:center;gap:6px;font-size:12px;margin:0;cursor:pointer"><input type="checkbox" style="width:auto" '+(st.soloAvisos?'checked ':'')+'onchange="window._impp.soloAvisos=this.checked;impp_paso2()"/>Ver solo filas con avisos</label></div>'
+    +secciones
+    +'<div class="modal-footer"><button class="btn btn-primary" onclick="impp_confirmar()"'+(total?'':' disabled')+'>Actualizar '+total+' precio(s)</button><button class="btn btn-ghost" onclick="impp_paso1()">← Volver</button><button class="btn btn-ghost" onclick="closeModal()">Cancelar</button></div>');
+}
+function impp_toggle(ai, idx, on){ window._impp.revision[ai].items[idx].incluir=on; impp_paso2(); }
+function impp_todos(ai, on){
+  window._impp.revision[ai].items.forEach(function(it){ if(it.productoId&&it.precio!=null) it.incluir=on; });
+  impp_paso2();
+}
+async function impp_confirmar(){
+  var st=window._impp;
+  var archivos=st.revision.map(function(a){
+    // Si una fila repetida apunta al mismo producto, gana la última (igual que avisa la revisión).
+    return {listaId:a.listaId, masIva:!!a.masIva, items:a.items.filter(function(it){return it.incluir;}).map(function(it){return {productoId:it.productoId, varianteId:it.varianteId||null, precio:it.precio};})};
+  }).filter(function(a){return a.items.length || a.masIva;});
+  document.getElementById('modal-content').innerHTML='<div class="loading-state"><div class="loading-icon">'+ICON_SPIN+'</div>Actualizando precios...</div>';
+  var r=await apiPost('/api/v1/productos/importar-precios/confirmar',{archivos:archivos});
+  if(!r.listas){ showToast(r.message||'Error al guardar','danger'); impp_paso2(); return; }
+  clearCache('productos');
+  document.getElementById('modal-content').innerHTML=impp_pasos_html(3)
+    +'<div style="text-align:center;padding:8px 4px"><div style="font-size:40px;margin-bottom:10px">✅</div><h3 style="margin-bottom:12px">Precios actualizados</h3>'
+    +r.listas.map(function(l){ return '<div style="font-size:14px;margin-bottom:6px">'+lp_esc(l.listaNombre)+(l.masIva?' <span class="badge b-info">+IVA</span>':'')+': <strong>'+l.actualizados+'</strong> precio(s)'+(l.salteados?' · '+l.salteados+' salteado(s)':'')+'</div>'; }).join('')
+    +'<div style="font-size:12px;color:var(--text2);margin-top:10px">El stock y los costos no se tocaron. Queda registrado en Auditoría.</div>'
+    +'<button class="btn btn-primary" style="width:100%;margin-top:16px" onclick="closeModal();clearCache(\'productos\');if(currentModule===\'inventario\')MODULES.inventario();">Listo</button></div>';
+}
 /* ── Importación masiva de productos por Excel/CSV ──
    Campos que el usuario puede mapear a una columna del archivo (nombre es obligatorio). */
 var IMPORT_CAMPOS = [
@@ -11139,6 +11391,7 @@ function pos_render(prods,cls){
     +'<div id="pos-descuento-row"></div>'
     +'<div id="pos-descuento-total-row"></div>'
     +'<div id="pos-cupon-row"></div>'
+    +'<div id="pos-iva-row"></div>'
     +'<div class="pos-total-row"><span>Total:</span><span id="pos-total" style="font-size:1.4rem;font-weight:800;color:var(--green)">$0</span></div>'
     // Chip opcional (no obligatorio, no interrumpe el cobro rápido) — el cajero puede
     // ignorarlo por completo, el snapshot silencioso con el default del tenant se guarda solo.
@@ -11344,7 +11597,7 @@ function pos_categoria_entrar(catId){
 function pos_prod_btn_html(p){
   return '<div class="pos-prod-btn" onclick="pos_click_producto(\''+p.id+'\')">'
     +'<div class="pos-prod-name">'+p.nombre+'</div>'
-    +'<div class="pos-prod-precio">'+fmtPesoCaja(pos_calcular_precio_lista(p))+(p.ventaPorPeso?' /kg':'')+'</div>'
+    +'<div class="pos-prod-precio">'+fmtPesoCaja(pos_calcular_precio_lista(p))+(p.ventaPorPeso?' /kg':'')+(pos_lista_mas_iva()?' <span style="font-size:11px;font-weight:600;opacity:.75">+IVA</span>':'')+'</div>'
     +'<div class="pos-prod-stock">Stock: '+(p.stock||0)+'</div>'+pos_ubic_html(p.ubicacion)+'</div>';
 }
 function pos_cat_btn_html(c){
@@ -11357,7 +11610,7 @@ function pos_prod_btn_ecomm_html(p){
   return '<div class="pos-prod-btn-ecomm" onclick="pos_click_producto(\''+p.id+'\')">'
     +(img?'<img class="pos-prod-img" src="'+img+'"/>':'<div class="pos-prod-img-vacia">📦</div>')
     +'<div class="pos-prod-name">'+p.nombre+'</div>'
-    +'<div class="pos-prod-precio">'+fmtPesoCaja(pos_calcular_precio_lista(p))+(p.ventaPorPeso?' /kg':'')+'</div>'
+    +'<div class="pos-prod-precio">'+fmtPesoCaja(pos_calcular_precio_lista(p))+(p.ventaPorPeso?' /kg':'')+(pos_lista_mas_iva()?' <span style="font-size:11px;font-weight:600;opacity:.75">+IVA</span>':'')+'</div>'
     +pos_ubic_html(p.ubicacion)
     +'</div>';
 }
@@ -11376,9 +11629,20 @@ function pos_lista_select_html(){
   if(!sec.length) return '';
   return '<select id="pos-lista" onchange="pos_lista_change()" title="Lista de precios con la que se cobra esta venta" style="width:100%;background:var(--input-bg);border:1px solid var(--border);border-radius:8px;color:var(--text);padding:8px;font-size:12px;margin-bottom:8px">'
     +'<option value="">⭐ Lista principal</option>'
-    +sec.map(function(l){return '<option value="'+l.id+'">🏷️ '+l.nombre+'</option>';}).join('')+'</select>';
+    +sec.map(function(l){return '<option value="'+l.id+'">🏷️ '+l.nombre+(l.masIva?' (+IVA)':'')+'</option>';}).join('')+'</select>';
 }
 function pos_lista_actual(){ var s=document.getElementById('pos-lista'); return s?s.value:''; }
+// V2.110.0: ¿la lista con la que se cobra es "+IVA"? (precios sin IVA, se suma el IVA del producto)
+function pos_lista_mas_iva(){
+  var id=pos_lista_actual(); if(!id) return false;
+  var l=(window._pos_listas||[]).find(function(x){return x.id===id;});
+  return !!(l&&l.masIva);
+}
+function pos_iva_producto(productoId){
+  var p=(window._pos_prods||[]).find(function(x){return x.id===productoId;});
+  var n=Number(p&&p.impuesto!=null?p.impuesto:21);
+  return isNaN(n)?21:n;
+}
 // Lista que se guarda en la venta como nota interna (la principal si no se eligió otra).
 function pos_lista_para_venta(){
   var id=pos_lista_actual();
@@ -11941,7 +12205,16 @@ function pos_calcular_totales(){
     var precioUnit=Math.round(l.precioUnit*factorFinal*100)/100;
     return {productoId:l.productoId, descripcion:l.descripcion, cantidad:l.cantidad, precioUnit:precioUnit, precioCosto:l.precioCosto, subtotal:Math.round(l.cantidad*precioUnit*100)/100};
   });
-  return {bruto:bruto, pct:pct, descuentoMonto:descuentoMonto, descuentoCuponMonto:descuentoCuponMonto, descuentoTotalMonto:descuentoTotalMonto, neto:neto, lineas:lineas};
+  // V2.110.0: lista "+IVA" (ej. Farmacias) → los precios de las líneas son SIN IVA y se suma el IVA
+  // de cada producto. `neto` sigue siendo "lo que se cobra" (con IVA) para todo el resto del PoS
+  // (efectivo, pago dividido, cupón); netoSinIva/ivaMonto van al ticket como subtotal/impuestos.
+  var netoSinIva=neto, ivaMonto=0, masIva=pos_lista_mas_iva();
+  if(masIva){
+    lineas=lineas.map(function(l){ return Object.assign({}, l, {impuesto:pos_iva_producto(l.productoId)}); });
+    ivaMonto=Math.round(lineas.reduce(function(a,l){ return a+l.subtotal*l.impuesto/100; },0)*100)/100;
+    neto=Math.round((netoSinIva+ivaMonto)*100)/100;
+  }
+  return {bruto:bruto, pct:pct, descuentoMonto:descuentoMonto, descuentoCuponMonto:descuentoCuponMonto, descuentoTotalMonto:descuentoTotalMonto, neto:neto, netoSinIva:netoSinIva, ivaMonto:ivaMonto, masIva:masIva, lineas:lineas};
 }
 // Cantidad de un producto por peso, para mostrar: en gramos enteros si pesa menos de 1kg (más
 // legible que "0,57"), en kg con 2 decimales si pesa 1kg o más. `esGramos` viaja en el onchange
@@ -12023,6 +12296,11 @@ function pos_render_items(){
   var cuponEl=document.getElementById('pos-cupon-row');
   if(cuponEl) cuponEl.innerHTML = window._pos_cupon
     ? '<div class="pos-total-row" style="color:var(--text2);font-size:13px"><span>🎟️ Cupón '+window._pos_cupon.codigo+':</span><span>-'+fmtPesoCaja(t.descuentoCuponMonto)+' <a href="#" onclick="event.preventDefault();pos_cupon_quitar()" style="color:var(--red-text)">✕</a></span></div>'
+    : '';
+  var ivaEl=document.getElementById('pos-iva-row');
+  if(ivaEl) ivaEl.innerHTML = t.masIva
+    ? '<div class="pos-total-row" style="color:var(--text2);font-size:13px"><span>Subtotal sin IVA:</span><span>'+fmtPesoCaja(t.netoSinIva)+'</span></div>'
+      +'<div class="pos-total-row" style="color:var(--text2);font-size:13px"><span>🧾 IVA:</span><span>+'+fmtPesoCaja(t.ivaMonto)+'</span></div>'
     : '';
   var totEl=document.getElementById('pos-total'); if(totEl) totEl.textContent=fmtPesoCaja(t.neto);
   pos_cart_bar_actualizar(window._pos_carrito.length, t.neto);
@@ -12375,7 +12653,7 @@ async function pos_cobrar_confirmar(efectivoInfo, pagosSplit){
   var btn=document.querySelector('.pos-caja-footer .btn-primary');
   if(btn){ btn.disabled=true; btn.textContent='Procesando...'; }
   try {
-    var ov=await apiPost('/api/v1/ordenes-venta',{clienteId:clienteId, sucursalId:sucursalId, listaPrecioId:pos_lista_para_venta(), subtotal:total, total:total, lineas:lineas});
+    var ov=await apiPost('/api/v1/ordenes-venta',{clienteId:clienteId, sucursalId:sucursalId, listaPrecioId:pos_lista_para_venta(), subtotal:t.netoSinIva, impuestos:t.ivaMonto, total:total, lineas:lineas});
     if(!ov.id){ showToast(ov.message||'Error al registrar la venta','danger'); return; }
 
     // Una venta de PoS es atómica: se confirma al toque (no pasa por el flujo de aprobación B2B)
@@ -12387,8 +12665,8 @@ async function pos_cobrar_confirmar(efectivoInfo, pagosSplit){
       ordenId:ov.id, clienteId:clienteId, sucursalId:sucursalId, listaPrecioId:pos_lista_para_venta(),
       cajaSesionId:window._pos_caja.id, medioPago:medioPagoSel.medioPago, medioPagoDetalle:medioPagoSel.medioPagoDetalle,
       pagosSplit:pagosSplit||undefined,
-      subtotal:total, total:total,
-      lineas:lineas.map(function(l){return {productoId:l.productoId,descripcion:l.descripcion,cantidad:l.cantidad,precioUnit:l.precioUnit,precioCosto:l.precioCosto,subtotal:l.subtotal};}),
+      subtotal:t.netoSinIva, impuestos:t.ivaMonto, total:total,
+      lineas:lineas.map(function(l){var o={productoId:l.productoId,descripcion:l.descripcion,cantidad:l.cantidad,precioUnit:l.precioUnit,precioCosto:l.precioCosto,subtotal:l.subtotal}; if(l.impuesto!=null) o.impuesto=l.impuesto; return o;}),
       auditoria:auditoria,
       cuponCodigo: window._pos_cupon ? window._pos_cupon.codigo : undefined,
       descuentoCuponMonto: window._pos_cupon ? t.descuentoCuponMonto : undefined,
@@ -12489,6 +12767,7 @@ function pos_ticket_html(t, tenant){
     +'<div class="tk-sep"></div>'
     +lineas
     +'<div class="tk-sep"></div>'
+    +(Math.abs(Number(t.impuestos||0))>0?'<div class="tk-linea-det"><span>Subtotal sin IVA</span><span>'+fmtPesoCaja(Math.abs(Number(t.subtotal)))+'</span></div><div class="tk-linea-det"><span>IVA</span><span>'+fmtPesoCaja(Math.abs(Number(t.impuestos)))+'</span></div>':'')
     +'<div class="tk-total"><span>'+(esNC?'TOTAL DEVUELTO':'TOTAL')+'</span><span>'+fmtPesoCaja(Math.abs(t.total))+'</span></div>'
     +'<div>Medio de pago: '+medioPago_label_ticket(t)+'</div>'
     +(t.observaciones?'<div>Motivo: '+t.observaciones+'</div>':'')
@@ -12628,6 +12907,9 @@ function etiqueta_calcular_precios(p, cuotas){
   var lid=window._etq_lista_id;
   var venta=Number(lid && p.preciosListas && p.preciosListas[lid]!=null ? p.preciosListas[lid] : (p.precioVenta||0));
   var imp=Number(p.impuesto||0);
+  // V2.110.0: lista "+IVA" → la etiqueta muestra el precio final (con el IVA del producto).
+  var lEtq=lid&&(window._invListas||window._pos_listas||[]).find(function(l){return l.id===lid;});
+  if(lEtq&&lEtq.masIva) venta=Math.round(venta*(1+(p.impuesto!=null?Number(p.impuesto):21)/100)*100)/100;
   var neto = imp>0 ? venta/(1+imp/100) : venta;
   var tarjeta=(cuotas||[]).map(function(c){
     return {cuotas:c.cuotas, monto: venta*(1+(Number(c.recargoPct)||0)/100)};
@@ -14114,6 +14396,12 @@ function cfg_tab_render(content, tab){
 // reescribe retroactivamente toda la historia vieja). Cada bump agrega una entrada arriba de
 // todo (más nueva primero) — además de loggear el detalle técnico en la memoria de siempre.
 var VERSIONES_CHANGELOG = [
+  { v:'2.110.0', fecha:'26/11/2026', cambios:[
+    'Nuevo "Actualizar precios" en Inventario: subís uno o varios Excel (ej. Consumidor Final y Farmacias), elegís a qué lista va cada uno, revisás antes → después y confirmás. Solo cambia precios (no toca stock ni costos) y respeta el precio exacto del Excel.',
+    'Listas de precio "+IVA": para listas que se manejan sin IVA (farmacias, mayoristas). En Inventario ves precio sin IVA, IVA % y precio con IVA, que se calcula solo.',
+    'IVA por producto: editable en la columna "IVA %" de Inventario o en varios a la vez con "Cambiar IVA". IVA por defecto para productos nuevos en Ajustes > Listas de precio.',
+    'En Caja, al cobrar con una lista +IVA (ej. un cliente farmacia), el carrito y el ticket muestran subtotal sin IVA + IVA = total.',
+  ]},
   { v:'2.109.0', fecha:'26/11/2026', cambios:[
     'Nuevo asistente BIMS IA ✨ (botón abajo a la derecha): preguntale cómo hacer cualquier cosa en el sistema y te explica paso a paso.',
     'También responde sobre tu negocio con tus datos reales, ej. "¿cómo viene mi stock de vestidos rojos talle L en Güemes?", "¿cuánto vendí esta semana?" o "¿qué clientes me deben?".',
@@ -14739,16 +15027,20 @@ function lp_reglas_tabla(lista){
 async function cfg_listas_precio(content){
   content.innerHTML='<div class="loading-state"><div class="loading-icon">'+ICON_SPIN+'</div>Cargando listas de precio...</div>';
   var enPapelera=papel_estado('listasprecio').viendo;
-  var [listas,cats,provs]=await Promise.all([
+  var [listas,cats,provs,kvLp]=await Promise.all([
     apiList('/api/v1/listas-precio?activa='+(!enPapelera)).catch(function(){return [];}),
     apiList('/api/v1/categorias').catch(function(){return [];}),
     apiList('/api/v1/proveedores?limit=500').catch(function(){return [];}),
+    apiGet('/api/v1/configuracion/kv').catch(function(){return [];}),
   ]);
+  var ivaDefKv=(Array.isArray(kvLp)?kvLp:[]).find(function(k){return k.clave==='iva.default';});
+  var ivaDef=ivaDefKv?Number(ivaDefKv.valor):21;
   window._cfg_listas=listas; window._cfg_lp_categorias=cats; window._cfg_lp_proveedores=provs;
   var principal=listas.find(function(l){return l.esDefault;});
   var secundarias=listas.filter(function(l){return !l.esDefault;});
   var html='<div style="background:var(--surface);border:1px solid var(--border);border-radius:14px;padding:24px;max-width:900px">'
     +'<h4 style="margin-bottom:6px">Listas de precio</h4>'
+    +(enPapelera?'':'<div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:14px"><button class="btn btn-ghost btn-sm" onclick="impp_abrir()">'+ICON_FILE_UP+' Actualizar precios desde Excel</button></div>')
     +'<div style="font-size:12px;color:var(--text2);margin-bottom:18px">La <strong>lista principal</strong> calcula el precio de venta de cada producto desde su costo (ej. costo +30%). Las <strong>listas secundarias</strong> (mayorista, revendedor, etc.) se calculan sobre la principal o sobre el costo, y se usan en Caja, Inventario y etiquetas. En cada lista podés poner reglas distintas por categoría, proveedor, categoría + proveedor o productos puntuales: siempre gana la más específica.</div>';
   if(principal && !enPapelera){
     html+='<div style="border:1px solid var(--border);border-radius:12px;padding:16px;margin-bottom:22px">'
@@ -14767,21 +15059,28 @@ async function cfg_listas_precio(content){
     +(enPapelera?'':'<div style="display:flex;gap:8px;margin-bottom:14px;flex-wrap:wrap"><input id="lp-nueva-nombre" placeholder="Nombre (ej: Mayorista, Lista B)" style="flex:1;min-width:180px"/>'
       +'<select id="lp-nueva-base" style="width:auto"><option value="PRINCIPAL">Sobre la lista principal</option><option value="COSTO">Sobre el costo</option></select>'
       +'<input id="lp-nueva-pct" type="number" step="0.01" placeholder="% (ej: -10)" style="width:110px"/>'
+      +'<label style="display:flex;align-items:center;gap:6px;font-size:12px;margin:0;cursor:pointer" title="Los precios de esta lista se cargan SIN IVA (ej. mayoristas, farmacias). Al cobrar se suma el IVA de cada producto."><input type="checkbox" id="lp-nueva-masiva" style="width:auto"/>Precios +IVA</label>'
       +'<button class="btn btn-primary btn-sm" onclick="cfg_lista_crear()">+ Crear</button></div>')
     +papel_tabs_html('listasprecio','cfg_listas_papel_cambiar')
     +'<div id="listasprecio-papel-bar">'+papel_bulk_bar_html('listasprecio','lista','cfg_listas_reactivar_masivo')+'</div>'
-    +tableWrap(enPapelera?['','Nombre','']:['Nombre','Calcula sobre','Regla general','Reglas específicas',''], (enPapelera?listas:secundarias).length?(enPapelera?listas:secundarias).map(function(l){
+    +tableWrap(enPapelera?['','Nombre','']:['Nombre','Calcula sobre','Precios','Regla general','Reglas específicas',''], (enPapelera?listas:secundarias).length?(enPapelera?listas:secundarias).map(function(l){
       if(enPapelera) return '<tr><td>'+papel_check_row_html('listasprecio', l.id, 'cfg_listas_bar_refrescar')+'</td><td style="font-weight:600">'+lp_esc(l.nombre)+'</td>'
         +'<td><button class="btn-icon" onclick="cfg_lista_reactivar(\''+l.id+'\')" title="Reactivar">♻️</button></td></tr>';
       var gral=(l.margenes||[]).find(function(m){return lp_peso(m)===0;});
       var esp=(l.margenes||[]).filter(function(m){return lp_peso(m)>0;}).length;
       return '<tr><td style="font-weight:600">'+lp_esc(l.nombre)+'</td>'
         +'<td>'+(l.base==='COSTO'?'Costo':'Lista principal')+'</td>'
+        +'<td><select style="width:auto;font-size:12px;padding:4px 6px" title="¿Los precios de esta lista incluyen IVA?" onchange="lp_lista_set(\''+l.id+'\',{masIva:this.value===\'1\'})"><option value="0"'+(l.masIva?'':' selected')+'>IVA incluido</option><option value="1"'+(l.masIva?' selected':'')+'>+IVA (sin IVA)</option></select></td>'
         +'<td>'+(gral?lp_ajuste_txt(gral,l).replace(/ sobre .*/,''):'<span style="color:var(--text2)">= principal</span>')+'</td>'
         +'<td>'+(esp?esp+' regla(s)':'—')+'</td>'
         +'<td style="white-space:nowrap"><button class="btn-icon" onclick="cfg_lista_margenes(\''+l.id+'\')" title="Editar reglas">'+ICON_EDIT+'</button>'
         +'<button class="btn-icon" onclick="cfg_lista_desactivar(\''+l.id+'\')" title="Desactivar">🚫</button></td></tr>';
-    }).join(''):emptyRow(5,enPapelera?'La papelera está vacía.':'Sin listas secundarias todavía.'))
+    }).join(''):emptyRow(enPapelera?3:6,enPapelera?'La papelera está vacía.':'Sin listas secundarias todavía.'))
+    +(enPapelera?'':'<div style="border-top:1px solid var(--border);margin-top:22px;padding-top:16px">'
+      +'<div style="font-weight:700;font-size:15px;margin-bottom:4px">🧾 IVA</div>'
+      +'<div style="font-size:12px;color:var(--text2);margin-bottom:10px">IVA % con el que se crean los productos nuevos. Cada producto puede tener el suyo (columna "IVA %" de Inventario, o tildando varios y "Cambiar IVA"). En las listas "+IVA" el precio con IVA se calcula con el IVA de cada producto.</div>'
+      +'<div style="display:flex;align-items:center;gap:8px;font-size:13px"><label style="margin:0">IVA por defecto:</label><input id="lp-iva-default" type="number" min="0" max="100" step="0.5" value="'+ivaDef+'" style="width:90px"/>%'
+      +'<button class="btn btn-ghost btn-sm" onclick="lp_iva_default_guardar()">Guardar</button></div></div>')
     +'</div>';
   content.innerHTML=html;
 }
@@ -14798,11 +15097,19 @@ async function cfg_lista_crear(){
   if(!nombre){showToast('Poné un nombre para la lista','danger');return;}
   var base=document.getElementById('lp-nueva-base').value;
   var pct=document.getElementById('lp-nueva-pct').value;
-  var r=await apiPost('/api/v1/listas-precio',{nombre:nombre, base:base});
+  var masIva=!!(document.getElementById('lp-nueva-masiva')||{}).checked;
+  var r=await apiPost('/api/v1/listas-precio',{nombre:nombre, base:base, masIva:masIva});
   if(!r.id){showToast(r.message||'Error','danger');return;}
   if(pct!=='') await apiPost('/api/v1/listas-precio/'+r.id+'/reglas',{tipo:'PCT', valor:+pct});
   showToast('Lista creada ✅','ok');
   cfg_listas_rerender();
+}
+async function lp_iva_default_guardar(){
+  var v=document.getElementById('lp-iva-default').value, n=Number(v);
+  if(v===''||!(n>=0&&n<=100)){ showToast('El IVA tiene que ser un % entre 0 y 100','danger'); return; }
+  var r=await apiPut('/api/v1/configuracion/kv/iva.default',{valor:String(n)});
+  if(r.error){ showToast(r.message||'Error','danger'); return; }
+  showToast('IVA por defecto: '+lp_num(n)+'% ✅','ok');
 }
 async function cfg_lista_desactivar(id){
   var r=await apiDel('/api/v1/listas-precio/'+id);

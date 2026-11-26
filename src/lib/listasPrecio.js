@@ -98,8 +98,10 @@ export function aplicarRegla(regla, base, redondeo) {
   if (!regla) return null
   const v = Number(regla.valor)
   let n
-  if (regla.tipo === 'MANUAL') n = v
-  else if (regla.tipo === 'MONTO') n = Number(base) + v
+  // V2.110.0: un precio fijo se respeta tal cual (ej. el redondeo "a mano" de una lista importada
+  // desde Excel) — el redondeo de la lista es solo para precios calculados (% o $).
+  if (regla.tipo === 'MANUAL') return Math.max(0, Math.round(v * 100) / 100)
+  if (regla.tipo === 'MONTO') n = Number(base) + v
   else n = Number(base) * (1 + v / 100)
   return Math.max(0, redondear(n, redondeo))
 }
